@@ -1,0 +1,18 @@
+{
+  "status": "success",
+  "result": {
+    "fileName": "firebase-js-config.json",
+    "fileContents": "{\n  \"projectId\": \"madurando-talentos\",\n  \"appId\": \"1:159830921787:web:23d0b1d3dbe27016f2821e\",\n  \"storageBucket\": \"madurando-talentos.firebasestorage.app\",\n  \"apiKey\": \"AIzaSyBvFOrVVlL8yhv1mF8i4w9M6G6uWIv40no\",\n  \"authDomain\": \"madurando-talentos.firebaseapp.com\",\n  \"messagingSenderId\": \"159830921787\",\n  \"measurementId\": \"G-VV2YYJD812\",\n  \"projectNumber\": \"159830921787\",\n  \"version\": \"2\"\n}",
+    "sdkConfig": {
+      "projectId": "madurando-talentos",
+      "appId": "1:159830921787:web:23d0b1d3dbe27016f2821e",
+      "storageBucket": "madurando-talentos.firebasestorage.app",
+      "apiKey": "AIzaSyBvFOrVVlL8yhv1mF8i4w9M6G6uWIv40no",
+      "authDomain": "madurando-talentos.firebaseapp.com",
+      "messagingSenderId": "159830921787",
+      "measurementId": "G-VV2YYJD812",
+      "projectNumber": "159830921787",
+      "version": "2"
+    }
+  }
+}
