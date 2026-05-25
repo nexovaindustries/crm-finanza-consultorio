@@ -144,15 +144,23 @@ export default function Sidebar() {
             </p>
             <span>{profile?.rol === 'admin' ? 'Administrador' : 'Secretaria'}</span>
           </div>
-          <button
-            className="btn btn-ghost btn-icon btn-sm"
-            onClick={handleLogout}
-            title="Cerrar sesión"
-            style={{ flexShrink: 0, color: 'var(--text-3)' }}
-          >
-            <Icons.Logout />
-          </button>
         </div>
+        <button
+          onClick={handleLogout}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '8px',
+            width: '100%', marginTop: '8px', padding: '9px 12px',
+            background: 'rgba(224,82,82,0.08)', border: '1px solid rgba(224,82,82,0.2)',
+            borderRadius: 'var(--radius)', color: 'var(--danger)',
+            fontSize: '0.85rem', fontWeight: '600', cursor: 'pointer',
+            transition: 'background 0.15s',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(224,82,82,0.16)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'rgba(224,82,82,0.08)'}
+        >
+          <Icons.Logout />
+          Cerrar sesión
+        </button>
       </div>
     </aside>
   );
