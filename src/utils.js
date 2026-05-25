@@ -46,6 +46,16 @@ export function cumpleanosProximo(fechaNac, dias = 7) {
   return diff >= 0 && diff <= dias;
 }
 
+// Verificar si un paciente es menor de edad (menos de 18 años)
+export function esMenorDeEdad(fechaNac) {
+  if (!fechaNac) return false;
+  const hoy = new Date();
+  const nac = new Date(fechaNac);
+  const edad = hoy.getFullYear() - nac.getFullYear();
+  const cumpleEsteAno = new Date(hoy.getFullYear(), nac.getMonth(), nac.getDate());
+  return edad < 18 || (edad === 18 && hoy < cumpleEsteAno);
+}
+
 // Iniciales de nombre
 export function getInitials(name) {
   if (!name) return '?';

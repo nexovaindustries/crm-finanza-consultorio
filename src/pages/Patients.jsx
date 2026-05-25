@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, Timestamp, where } from 'firebase/firestore';
-import { formatDate, esCumpleanosHoy, cumpleanosProximo, getInitials, formatSoles } from '../utils';
+import { formatDate, esCumpleanosHoy, cumpleanosProximo, getInitials, formatSoles, esMenorDeEdad } from '../utils';
 
 export default function Patients() {
   const [patients, setPatients] = useState([]);
@@ -18,7 +18,10 @@ export default function Patients() {
   const [historyTab, setHistoryTab] = useState('citas'); // 'citas', 'pagos'
 
   function defaultForm() {
-    return { nombre: '', dni: '', fechaNacimiento: '', telefono: '', email: '', direccion: '', notas: '', estado: 'activo', servicio: 'entrada' };
+    return {
+      nombre: '', dni: '', fechaNacimiento: '', telefono: '', email: '', direccion: '', notas: '', estado: 'activo', servicio: 'entrada',
+      apoderado_nombre: '', apoderado_dni: '', apoderado_telefono: '', apoderado_email: '', apoderado_relacion: 'madre',
+    };
   }
 
   useEffect(() => { loadPatients(); }, []);
@@ -79,7 +82,10 @@ export default function Patients() {
     setForm({
       nombre: p.nombre || '', dni: p.dni || '', fechaNacimiento: p.fechaNacimiento || '',
       telefono: p.telefono || '', email: p.email || '', direccion: p.direccion || '',
-      notas: p.notas || '', estado: p.estado || 'activo', servicio: p.servicio || 'entrada'
+      notas: p.notas || '', estado: p.estado || 'activo', servicio: p.servicio || 'entrada',
+      apoderado_nombre: p.apoderado_nombre || '', apoderado_dni: p.apoderado_dni || '',
+      apoderado_telefono: p.apoderado_telefono || '', apoderado_email: p.apoderado_email || '',
+      apoderado_relacion: p.apoderado_relacion || 'madre',
     });
     setModalMode('edit');
     setShowModal(true);
@@ -155,9 +161,19 @@ export default function Patients() {
                         {getInitials(p.nombre)}
                       </div>
                       <div>
-                        <strong>{p.nombre}</strong>
-                        {cumple && <span style={{ marginLeft: '6px' }} title="🎂 NO CONTACTAR HOY">🎂</span>}
-                        {proxCumple && <span style={{ marginLeft: '6px', fontSize: '11px', color: 'var(--accent)' }}>próximo cumple</span>}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <strong>{p.nombre}</strong>
+                          {cumple && <span title="🎂 NO CONTACTAR HOY">🎂</span>}
+                          {esMenorDeEdad(p.fechaNacimiento) && (
+                            <span style={{ fontSize: '10px', background: 'rgba(255,203,5,0.18)', color: '#b8860b', border: '1px solid rgba(255,203,5,0.5)', borderRadius: '4px', padding: '1px 6px', fontWeight: '600' }}>Menor</span>
+                          )}
+                        </div>
+                        {proxCumple && <span style={{ fontSize: '11px', color: 'var(--accent)' }}>próximo cumple</span>}
+                        {esMenorDeEdad(p.fechaNacimiento) && p.apoderado_nombre && (
+                          <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>
+                            Apoderado: {p.apoderado_nombre}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -250,6 +266,15 @@ export default function Patients() {
             
             {modalMode === 'history' ? (
               <div style={{ padding: '0 20px 20px' }}>
+                {esMenorDeEdad(selected?.fechaNacimiento) && selected?.apoderado_nombre && (
+                  <div style={{ background: 'rgba(255,203,5,0.08)', border: '1px solid rgba(255,203,5,0.4)', borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: '16px', fontSize: '0.82rem' }}>
+                    <strong style={{ color: 'var(--accent)' }}>Apoderado:</strong>{' '}
+                    {selected.apoderado_nombre}
+                    {selected.apoderado_relacion && <span style={{ color: 'var(--text-3)', marginLeft: '6px' }}>({selected.apoderado_relacion})</span>}
+                    {selected.apoderado_telefono && <span style={{ marginLeft: '10px' }}>📞 {selected.apoderado_telefono}</span>}
+                    {selected.apoderado_dni && <span style={{ marginLeft: '10px', color: 'var(--text-3)' }}>DNI: {selected.apoderado_dni}</span>}
+                  </div>
+                )}
                 <div className="tabs" style={{ marginBottom: '20px' }}>
                   <button className={`tab-btn ${historyTab === 'citas' ? 'active' : ''}`} onClick={() => setHistoryTab('citas')}>🗓️ Citas ({history.appointments.length})</button>
                   <button className={`tab-btn ${historyTab === 'pagos' ? 'active' : ''}`} onClick={() => setHistoryTab('pagos')}>💰 Pagos ({history.payments.length})</button>
@@ -357,6 +382,48 @@ export default function Patients() {
                   <label className="form-label">Notas internas</label>
                   <textarea className="form-textarea" value={form.notas} onChange={e => setForm({...form, notas: e.target.value})} placeholder="Información adicional relevante..." />
                 </div>
+
+                {esMenorDeEdad(form.fechaNacimiento) && (
+                  <div style={{ marginTop: '8px', border: '1.5px solid var(--accent)', borderRadius: 'var(--radius)', padding: '16px', background: 'rgba(255,203,5,0.07)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                      <span style={{ fontWeight: '600', fontSize: '0.875rem', color: 'var(--accent)' }}>Datos del padre / madre / tutor apoderado</span>
+                      <span style={{ fontSize: '0.75rem', background: 'var(--accent)', color: '#fff', borderRadius: '4px', padding: '1px 7px', fontWeight: '600' }}>Menor de edad</span>
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label className="form-label">Nombre completo del apoderado *</label>
+                        <input className="form-input" required={esMenorDeEdad(form.fechaNacimiento)} value={form.apoderado_nombre} onChange={e => setForm({...form, apoderado_nombre: e.target.value})} placeholder="Nombre y apellidos" />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Relación con el paciente</label>
+                        <select className="form-select" value={form.apoderado_relacion} onChange={e => setForm({...form, apoderado_relacion: e.target.value})}>
+                          <option value="madre">Madre</option>
+                          <option value="padre">Padre</option>
+                          <option value="tutor_legal">Tutor legal</option>
+                          <option value="abuelo">Abuelo/a</option>
+                          <option value="tio">Tío/a</option>
+                          <option value="otro">Otro</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label className="form-label">DNI del apoderado</label>
+                        <input className="form-input" value={form.apoderado_dni} onChange={e => setForm({...form, apoderado_dni: e.target.value})} placeholder="12345678" maxLength={8} />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Teléfono del apoderado</label>
+                        <input className="form-input" value={form.apoderado_telefono} onChange={e => setForm({...form, apoderado_telefono: e.target.value})} placeholder="9XXXXXXXX" />
+                      </div>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Correo del apoderado</label>
+                      <input className="form-input" type="email" value={form.apoderado_email} onChange={e => setForm({...form, apoderado_email: e.target.value})} placeholder="correo@ejemplo.com" />
+                    </div>
+                  </div>
+                )}
+
                 <div className="modal-footer">
                   <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
                   <button type="submit" className="btn btn-primary">
