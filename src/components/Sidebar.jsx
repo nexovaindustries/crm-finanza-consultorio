@@ -144,27 +144,27 @@ export default function Sidebar() {
             </p>
             <span>{profile?.rol === 'admin' ? 'Administrador' : 'Secretaria'}</span>
           </div>
+          <button
+            onClick={handleLogout}
+            title="Cerrar sesión"
+            style={{
+              flexShrink: 0, display: 'flex', alignItems: 'center', gap: '5px',
+              padding: '5px 8px', border: '1px solid rgba(224,82,82,0.3)',
+              borderRadius: '6px', background: 'transparent', color: 'var(--danger)',
+              fontSize: '0.72rem', fontWeight: '600', cursor: 'pointer',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(224,82,82,0.1)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+            Salir
+          </button>
         </div>
-        <button
-          onClick={handleLogout}
-          style={{
-            display: 'flex', alignItems: 'center', gap: '8px',
-            width: '100%', marginTop: '8px', padding: '9px 12px',
-            background: 'rgba(224,82,82,0.08)', border: '1px solid rgba(224,82,82,0.2)',
-            borderRadius: 'var(--radius)', color: 'var(--danger)',
-            fontSize: '0.85rem', fontWeight: '600', cursor: 'pointer',
-            transition: 'background 0.15s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = 'rgba(224,82,82,0.16)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'rgba(224,82,82,0.08)'}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" style={{ flexShrink: 0 }}>
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-            <polyline points="16 17 21 12 16 7"/>
-            <line x1="21" y1="12" x2="9" y2="12"/>
-          </svg>
-          Cerrar sesión
-        </button>
       </div>
     </aside>
   );
