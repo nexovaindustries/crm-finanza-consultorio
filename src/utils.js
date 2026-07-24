@@ -27,10 +27,16 @@ export function parseLocalDate(dateStr) {
   return new Date(y, m - 1, d);
 }
 
-// Formatear fecha legible
-export function formatDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = parseLocalDate(dateStr);
+// Formatear fecha legible. Acepta un Timestamp de Firestore, un Date,
+// una fecha ISO completa o una fecha simple "YYYY-MM-DD".
+export function formatDate(value) {
+  if (!value) return '—';
+  let d;
+  if (typeof value?.toDate === 'function') d = value.toDate();
+  else if (value instanceof Date) d = value;
+  else if (typeof value === 'string' && value.includes('T')) d = new Date(value);
+  else d = parseLocalDate(value);
+  if (!d || isNaN(d.getTime())) return '—';
   return d.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 

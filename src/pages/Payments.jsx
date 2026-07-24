@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, updateDoc, doc, query, orderBy, Timestamp } from 'firebase/firestore';
 import { formatDate, calcularIGV, formatSoles, PRECIO_SESION_ENTRADA, PRECIO_PAQUETE_4 } from '../utils';
+import SearchableSelect from '../components/SearchableSelect';
 
 const SERVICIOS = [
   { id: 'entrada', label: 'Sesión de Entrada', precio: PRECIO_SESION_ENTRADA },
@@ -21,6 +22,13 @@ export default function Payments() {
   const [cobroTarget, setCobroTarget] = useState(null);
   const [cobroCuentaId, setCobroCuentaId] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const [abonoTarget, setAbonoTarget] = useState(null);
+  const [abonoForm, setAbonoForm] = useState(defaultAbonoForm());
+
+  function defaultAbonoForm() {
+    return { cuentaId: '', cuentaNombre: '', sesiones: 1, monto: '' };
+  }
 
   function defaultForm() {
     return { pacienteId: '', pacienteNombre: '', servicio: 'entrada', monto: PRECIO_SESION_ENTRADA, fecha: new Date().toISOString().split('T')[0], estado: 'cobrado', cuentaId: '', cuentaNombre: '', notas: '' };
@@ -64,7 +72,9 @@ export default function Payments() {
 
   async function savePayment(e) {
     e.preventDefault();
+    if (!form.pacienteId) { alert('Selecciona un paciente de la lista.'); return; }
     const igv = calcularIGV(Number(form.monto));
+    const pagadoDeUna = form.estado === 'cobrado';
     await addDoc(collection(db, 'payments'), {
       ...form,
       monto: Number(form.monto),
@@ -72,13 +82,56 @@ export default function Payments() {
       igv: igv.igv,
       fecha: Timestamp.fromDate(new Date(form.fecha)),
       createdAt: Timestamp.now(),
+      montoPagado: pagadoDeUna ? Number(form.monto) : 0,
+      sesionesPagadas: pagadoDeUna && form.servicio === 'paquete4' ? 4 : 0,
+      abonos: [],
     });
-    if (form.estado === 'cobrado' && form.cuentaId) {
+    if (pagadoDeUna && form.cuentaId) {
       await incrementarSaldo(form.cuentaId, Number(form.monto));
     }
     setShowModal(false);
     setForm(defaultForm());
     loadAll();
+  }
+
+  const handleAbonoCuenta = (cuentaId) => {
+    const c = bankAccounts.find(x => x.id === cuentaId);
+    setAbonoForm(f => ({ ...f, cuentaId, cuentaNombre: c ? (c.nombre || c.banco) : '' }));
+  };
+
+  const openAbono = (p) => {
+    const saldoPendiente = (p.monto || 0) - (p.montoPagado || 0);
+    const sesionesRestantes = 4 - (p.sesionesPagadas || 0);
+    const sugerido = sesionesRestantes > 0 ? Math.min(saldoPendiente, (p.monto || 0) / 4) : saldoPendiente;
+    setAbonoTarget(p);
+    setAbonoForm({ cuentaId: '', cuentaNombre: '', sesiones: 1, monto: sugerido > 0 ? sugerido.toFixed(2) : '' });
+  };
+
+  async function saveAbono(e) {
+    e.preventDefault();
+    if (!abonoTarget || !abonoForm.cuentaId) return;
+    setSaving(true);
+    try {
+      const monto = Number(abonoForm.monto) || 0;
+      const sesiones = Number(abonoForm.sesiones) || 0;
+      const abono = { cuentaId: abonoForm.cuentaId, cuentaNombre: abonoForm.cuentaNombre, sesiones, monto, fecha: Timestamp.now() };
+      const montoPagado = (abonoTarget.montoPagado || 0) + monto;
+      const sesionesPagadas = Math.min((abonoTarget.sesionesPagadas || 0) + sesiones, 4);
+      const estado = montoPagado >= (abonoTarget.monto || 0) ? 'cobrado' : 'pendiente';
+      await updateDoc(doc(db, 'payments', abonoTarget.id), {
+        abonos: [...(abonoTarget.abonos || []), abono],
+        montoPagado,
+        sesionesPagadas,
+        estado,
+        cuentaId: abonoForm.cuentaId,
+        cuentaNombre: abonoForm.cuentaNombre,
+      });
+      await incrementarSaldo(abonoForm.cuentaId, monto);
+      setAbonoTarget(null);
+      loadAll();
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function changeStatus(id, estado) {
@@ -141,8 +194,15 @@ export default function Payments() {
                   <td>{SERVICIOS.find(s => s.id === p.servicio)?.label || p.servicio}</td>
                   <td style={{ color: 'var(--text-3)' }}>{formatSoles(p.baseImponible || igv.base)}</td>
                   <td style={{ color: 'var(--warning)' }}>{formatSoles(p.igv || igv.igv)}</td>
-                  <td><strong>{formatSoles(p.monto)}</strong></td>
-                  <td style={{ color: 'var(--text-3)' }}>{p.fecha?.toDate ? formatDate(p.fecha.toDate().toISOString()) : formatDate(p.fecha)}</td>
+                  <td>
+                    <strong>{formatSoles(p.monto)}</strong>
+                    {p.servicio === 'paquete4' && (
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: '2px' }}>
+                        {formatSoles(p.montoPagado || 0)} pagado · {p.sesionesPagadas || 0}/4 ses.
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ color: 'var(--text-3)' }}>{formatDate(p.fecha)}</td>
                   <td>
                     <span className={`badge badge-${p.estado === 'cobrado' ? 'success' : p.estado === 'pendiente' ? 'warning' : 'danger'}`}>
                       {p.estado === 'cobrado' ? '✅ Cobrado' : p.estado === 'pendiente' ? '⏳ Pendiente' : '❌ Vencido'}
@@ -151,7 +211,13 @@ export default function Payments() {
                   <td>
                     {p.estado === 'pendiente' && (
                       <div style={{ display: 'flex', gap: '4px' }}>
-                        <button className="btn btn-sm btn-primary" onClick={() => { setCobroTarget(p); setCobroCuentaId(''); }}>✅ Cobrar</button>
+                        {p.servicio === 'paquete4' ? (
+                          <button className="btn btn-sm btn-primary" onClick={() => openAbono(p)}>
+                            {p.montoPagado > 0 ? '💳 Abonar' : '✅ Cobrar'}
+                          </button>
+                        ) : (
+                          <button className="btn btn-sm btn-primary" onClick={() => { setCobroTarget(p); setCobroCuentaId(''); }}>✅ Cobrar</button>
+                        )}
                         <button className="btn btn-sm btn-ghost" onClick={() => changeStatus(p.id, 'vencido')}>❌</button>
                       </div>
                     )}
@@ -173,10 +239,13 @@ export default function Payments() {
             <form onSubmit={savePayment}>
               <div className="form-group">
                 <label className="form-label">Paciente *</label>
-                <select className="form-select" required value={form.pacienteId} onChange={e => handlePaciente(e.target.value)}>
-                  <option value="">Seleccionar paciente...</option>
-                  {patients.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                </select>
+                <SearchableSelect
+                  options={patients.map(p => ({ id: p.id, label: p.nombre }))}
+                  value={form.pacienteId}
+                  onChange={handlePaciente}
+                  placeholder="Buscar paciente por nombre o apellido..."
+                  required
+                />
               </div>
               <div className="form-row">
                 <div className="form-group">
@@ -269,6 +338,72 @@ export default function Payments() {
               <button className="btn btn-secondary" onClick={() => setCobroTarget(null)}>Cancelar</button>
               <button className="btn btn-primary" disabled={!cobroCuentaId || saving} onClick={confirmarCobro}>{saving ? 'Guardando...' : 'Confirmar cobro'}</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {abonoTarget && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setAbonoTarget(null)}>
+          <div className="modal">
+            <div className="modal-header">
+              <h3 className="modal-title">📦 Abono de paquete</h3>
+              <button className="btn btn-ghost btn-icon" onClick={() => setAbonoTarget(null)}>✕</button>
+            </div>
+            <div style={{ background: 'var(--bg-3)', borderRadius: 'var(--radius)', padding: '14px 16px', marginBottom: '16px', borderLeft: '3px solid var(--primary)' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)', marginBottom: '8px' }}>{abonoTarget.pacienteNombre}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '4px' }}>
+                <span style={{ color: 'var(--text-3)' }}>Total del paquete</span><strong>{formatSoles(abonoTarget.monto)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: '4px' }}>
+                <span style={{ color: 'var(--text-3)' }}>Pagado hasta ahora</span><strong style={{ color: 'var(--success)' }}>{formatSoles(abonoTarget.montoPagado || 0)}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
+                <span style={{ color: 'var(--text-3)' }}>Saldo pendiente</span><strong style={{ color: 'var(--warning)' }}>{formatSoles((abonoTarget.monto || 0) - (abonoTarget.montoPagado || 0))}</strong>
+              </div>
+            </div>
+            <form onSubmit={saveAbono}>
+              <div className="form-group">
+                <label className="form-label">💳 ¿A qué cuenta se paga? *</label>
+                <select className="form-select" required value={abonoForm.cuentaId} onChange={e => handleAbonoCuenta(e.target.value)}>
+                  <option value="">Seleccionar cuenta...</option>
+                  {bankAccounts.map(a => <option key={a.id} value={a.id}>🏦 {a.nombre || a.banco} — {formatSoles(a.saldo || 0)}</option>)}
+                </select>
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Sesión(es) que cubre *</label>
+                  <input className="form-input" type="number" required min="1" max={4 - (abonoTarget.sesionesPagadas || 0)} value={abonoForm.sesiones} onChange={e => setAbonoForm({...abonoForm, sesiones: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Monto a pagar (S/.) *</label>
+                  <input className="form-input" type="number" required min="0.01" step="0.01" max={(abonoTarget.monto || 0) - (abonoTarget.montoPagado || 0)} value={abonoForm.monto} onChange={e => setAbonoForm({...abonoForm, monto: e.target.value})} />
+                </div>
+              </div>
+              {abonoForm.monto && (() => {
+                const restante = (abonoTarget.monto || 0) - (abonoTarget.montoPagado || 0) - (Number(abonoForm.monto) || 0);
+                const sesionesTotal = Math.min((abonoTarget.sesionesPagadas || 0) + (Number(abonoForm.sesiones) || 0), 4);
+                return (
+                  <div style={{
+                    background: restante <= 0 ? 'var(--success-light)' : 'var(--warning-light)',
+                    border: `1px solid ${restante <= 0 ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)'}`,
+                    borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: '16px', fontSize: '0.83rem',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-3)' }}>Saldo restante después de este pago:</span>
+                      <strong>{formatSoles(Math.max(restante, 0))}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
+                      <span style={{ color: 'var(--text-3)' }}>Sesiones pagadas:</span>
+                      <strong>{sesionesTotal}/4</strong>
+                    </div>
+                  </div>
+                );
+              })()}
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setAbonoTarget(null)}>Cancelar</button>
+                <button type="submit" className="btn btn-primary" disabled={!abonoForm.cuentaId || saving}>{saving ? 'Guardando...' : 'Registrar abono'}</button>
+              </div>
+            </form>
           </div>
         </div>
       )}

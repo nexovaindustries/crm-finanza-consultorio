@@ -88,7 +88,7 @@ export default function Expenses() {
                 <td><strong>{e.descripcion}</strong></td>
                 <td><span className="badge badge-neutral">{e.categoria}</span></td>
                 <td><strong style={{ color: 'var(--danger)' }}>{formatSoles(e.monto)}</strong></td>
-                <td style={{ color: 'var(--text-3)' }}>{e.fecha?.toDate ? formatDate(e.fecha.toDate().toISOString()) : formatDate(e.fecha)}</td>
+                <td style={{ color: 'var(--text-3)' }}>{formatDate(e.fecha)}</td>
                 <td>
                   {e.recurrente
                     ? <span className="badge badge-info">🔄 {e.frecuencia}</span>
