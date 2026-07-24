@@ -372,6 +372,16 @@ td strong { color: var(--text); font-weight: 600; }
 .search-select-option:hover { background: var(--bg-3); }
 .search-select-empty { padding: 9px 12px; font-size: 0.82rem; color: var(--text-3); }
 
+/* ── Pull to refresh ── */
+html, body { overscroll-behavior-y: contain; }
+.ptr-indicator {
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; color: var(--primary);
+}
+.ptr-spinner { display: flex; }
+.ptr-spinner.ptr-spinning { animation: ptr-spin 0.7s linear infinite; }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
+
 /* ── Alert boxes ── */
 .alert {
   display: flex; align-items: flex-start; gap: 10px;

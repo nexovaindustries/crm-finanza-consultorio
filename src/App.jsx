@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Sidebar from './components/Sidebar';
+import PullToRefresh from './components/PullToRefresh';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Patients from './pages/Patients';
@@ -41,7 +42,9 @@ function AppLayout({ children }) {
           <img src="/logo.png" alt="Madurando Talentos" className="mobile-topbar-logo" />
         </div>
         <div className="mobile-topbar-spacer" />
-        <main className="main-content">{children}</main>
+        <main className="main-content">
+          <PullToRefresh>{children}</PullToRefresh>
+        </main>
       </div>
     </div>
   );
