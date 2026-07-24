@@ -41,12 +41,8 @@ export default function Payments() {
   }
 
   const handleCuenta = (cuentaId) => {
-    if (cuentaId === 'efectivo') {
-      setForm(f => ({ ...f, cuentaId: 'efectivo', cuentaNombre: 'Efectivo' }));
-    } else {
-      const c = bankAccounts.find(x => x.id === cuentaId);
-      setForm(f => ({ ...f, cuentaId, cuentaNombre: c ? (c.nombre || c.banco) : '' }));
-    }
+    const c = bankAccounts.find(x => x.id === cuentaId);
+    setForm(f => ({ ...f, cuentaId, cuentaNombre: c ? (c.nombre || c.banco) : '' }));
   };
 
   async function incrementarSaldo(cuentaId, monto) {
@@ -77,7 +73,7 @@ export default function Payments() {
       fecha: Timestamp.fromDate(new Date(form.fecha)),
       createdAt: Timestamp.now(),
     });
-    if (form.estado === 'cobrado' && form.cuentaId && form.cuentaId !== 'efectivo') {
+    if (form.estado === 'cobrado' && form.cuentaId) {
       await incrementarSaldo(form.cuentaId, Number(form.monto));
     }
     setShowModal(false);
@@ -94,11 +90,9 @@ export default function Payments() {
     if (!cobroTarget || !cobroCuentaId) return;
     setSaving(true);
     try {
-      const cuentaNombre = cobroCuentaId === 'efectivo' ? 'Efectivo' : (bankAccounts.find(x => x.id === cobroCuentaId)?.nombre || bankAccounts.find(x => x.id === cobroCuentaId)?.banco || '');
+      const cuentaNombre = bankAccounts.find(x => x.id === cobroCuentaId)?.nombre || bankAccounts.find(x => x.id === cobroCuentaId)?.banco || '';
       await updateDoc(doc(db, 'payments', cobroTarget.id), { estado: 'cobrado', cuentaId: cobroCuentaId, cuentaNombre });
-      if (cobroCuentaId !== 'efectivo') {
-        await incrementarSaldo(cobroCuentaId, cobroTarget.monto || 0);
-      }
+      await incrementarSaldo(cobroCuentaId, cobroTarget.monto || 0);
       setCobroTarget(null);
       setCobroCuentaId('');
       loadAll();
@@ -210,10 +204,9 @@ export default function Payments() {
                 </div>
               </div>
               <div className="form-group">
-                <label className="form-label">💳 ¿Dónde ingresó el cobro?</label>
-                <select className="form-select" value={form.cuentaId} onChange={e => handleCuenta(e.target.value)}>
-                  <option value="">Sin especificar</option>
-                  <option value="efectivo">💵 Efectivo</option>
+                <label className="form-label">💳 ¿Dónde ingresó el cobro? *</label>
+                <select className="form-select" required value={form.cuentaId} onChange={e => handleCuenta(e.target.value)}>
+                  <option value="">Seleccionar cuenta...</option>
                   {bankAccounts.map(a => <option key={a.id} value={a.id}>🏦 {a.nombre || a.banco} — {formatSoles(a.saldo || 0)}</option>)}
                 </select>
               </div>
@@ -256,13 +249,12 @@ export default function Payments() {
             </div>
             <div className="form-group">
               <label className="form-label">💳 ¿Dónde ingresó este cobro? *</label>
-              <select className="form-select" value={cobroCuentaId} onChange={e => setCobroCuentaId(e.target.value)}>
-                <option value="">Seleccionar fuente...</option>
-                <option value="efectivo">💵 Efectivo</option>
+              <select className="form-select" required value={cobroCuentaId} onChange={e => setCobroCuentaId(e.target.value)}>
+                <option value="">Seleccionar cuenta...</option>
                 {bankAccounts.map(a => <option key={a.id} value={a.id}>🏦 {a.nombre || a.banco} — {formatSoles(a.saldo || 0)}</option>)}
               </select>
             </div>
-            {cobroCuentaId && cobroCuentaId !== 'efectivo' && (() => {
+            {cobroCuentaId && (() => {
               const cuenta = bankAccounts.find(x => x.id === cobroCuentaId);
               if (!cuenta) return null;
               const nuevoSaldo = (cuenta.saldo || 0) + (cobroTarget.monto || 0);

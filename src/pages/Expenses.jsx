@@ -28,12 +28,8 @@ export default function Expenses() {
   }
 
   const handleCuenta = (cuentaId) => {
-    if (cuentaId === 'efectivo') {
-      setForm(f => ({ ...f, cuentaId: 'efectivo', cuentaNombre: 'Efectivo' }));
-    } else {
-      const c = bankAccounts.find(x => x.id === cuentaId);
-      setForm(f => ({ ...f, cuentaId, cuentaNombre: c ? (c.nombre || c.banco) : '' }));
-    }
+    const c = bankAccounts.find(x => x.id === cuentaId);
+    setForm(f => ({ ...f, cuentaId, cuentaNombre: c ? (c.nombre || c.banco) : '' }));
   };
 
   async function saveExpense(e) {
@@ -44,11 +40,9 @@ export default function Expenses() {
       fecha: Timestamp.fromDate(new Date(form.fecha)),
       createdAt: Timestamp.now(),
     });
-    if (form.cuentaId && form.cuentaId !== 'efectivo') {
-      const cuenta = bankAccounts.find(x => x.id === form.cuentaId);
-      if (cuenta) {
-        await updateDoc(doc(db, 'bank_accounts', form.cuentaId), { saldo: (cuenta.saldo || 0) - Number(form.monto), updatedAt: Timestamp.now() });
-      }
+    const cuenta = bankAccounts.find(x => x.id === form.cuentaId);
+    if (cuenta) {
+      await updateDoc(doc(db, 'bank_accounts', form.cuentaId), { saldo: (cuenta.saldo || 0) - Number(form.monto), updatedAt: Timestamp.now() });
     }
     setShowModal(false);
     setForm(defaultForm());
@@ -156,10 +150,9 @@ export default function Expenses() {
                 </div>
               )}
               <div className="form-group">
-                <label className="form-label">💳 ¿De dónde salió el pago?</label>
-                <select className="form-select" value={form.cuentaId} onChange={e => handleCuenta(e.target.value)}>
-                  <option value="">Sin especificar</option>
-                  <option value="efectivo">💵 Efectivo</option>
+                <label className="form-label">💳 ¿De dónde salió el pago? *</label>
+                <select className="form-select" required value={form.cuentaId} onChange={e => handleCuenta(e.target.value)}>
+                  <option value="">Seleccionar cuenta...</option>
                   {bankAccounts.map(a => <option key={a.id} value={a.id}>🏦 {a.nombre || a.banco} — {formatSoles(a.saldo || 0)}</option>)}
                 </select>
               </div>
