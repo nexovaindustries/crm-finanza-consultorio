@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, addDoc, updateDoc, doc, query, orderBy, Timestamp, where } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, doc, query, orderBy, Timestamp } from 'firebase/firestore';
 import { formatDate, calcularIGV, formatSoles, PRECIO_SESION_ENTRADA, PRECIO_PAQUETE_4 } from '../utils';
 
 const SERVICIOS = [
@@ -12,25 +12,48 @@ const SERVICIOS = [
 export default function Payments() {
   const [payments, setPayments] = useState([]);
   const [patients, setPatients] = useState([]);
+  const [bankAccounts, setBankAccounts] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [filter, setFilter] = useState('todos');
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(defaultForm());
 
+  const [cobroTarget, setCobroTarget] = useState(null);
+  const [cobroCuentaId, setCobroCuentaId] = useState('');
+  const [saving, setSaving] = useState(false);
+
   function defaultForm() {
-    return { pacienteId: '', pacienteNombre: '', servicio: 'entrada', monto: PRECIO_SESION_ENTRADA, fecha: new Date().toISOString().split('T')[0], estado: 'cobrado', notas: '' };
+    return { pacienteId: '', pacienteNombre: '', servicio: 'entrada', monto: PRECIO_SESION_ENTRADA, fecha: new Date().toISOString().split('T')[0], estado: 'cobrado', cuentaId: '', cuentaNombre: '', notas: '' };
   }
 
   useEffect(() => { loadAll(); }, []);
 
   async function loadAll() {
-    const [paySnap, patSnap] = await Promise.all([
+    const [paySnap, patSnap, bankSnap] = await Promise.all([
       getDocs(query(collection(db, 'payments'), orderBy('fecha', 'desc'))),
-      getDocs(query(collection(db, 'patients'), orderBy('nombre')))
+      getDocs(query(collection(db, 'patients'), orderBy('nombre'))),
+      getDocs(query(collection(db, 'bank_accounts'), orderBy('banco'))),
     ]);
     setPayments(paySnap.docs.map(d => ({ id: d.id, ...d.data() })));
     setPatients(patSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    setBankAccounts(bankSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     setLoading(false);
+  }
+
+  const handleCuenta = (cuentaId) => {
+    if (cuentaId === 'efectivo') {
+      setForm(f => ({ ...f, cuentaId: 'efectivo', cuentaNombre: 'Efectivo' }));
+    } else {
+      const c = bankAccounts.find(x => x.id === cuentaId);
+      setForm(f => ({ ...f, cuentaId, cuentaNombre: c ? (c.nombre || c.banco) : '' }));
+    }
+  };
+
+  async function incrementarSaldo(cuentaId, monto) {
+    const cuenta = bankAccounts.find(x => x.id === cuentaId);
+    if (cuenta) {
+      await updateDoc(doc(db, 'bank_accounts', cuentaId), { saldo: (cuenta.saldo || 0) + monto, updatedAt: Timestamp.now() });
+    }
   }
 
   const handleServicio = (servicioId) => {
@@ -54,6 +77,9 @@ export default function Payments() {
       fecha: Timestamp.fromDate(new Date(form.fecha)),
       createdAt: Timestamp.now(),
     });
+    if (form.estado === 'cobrado' && form.cuentaId && form.cuentaId !== 'efectivo') {
+      await incrementarSaldo(form.cuentaId, Number(form.monto));
+    }
     setShowModal(false);
     setForm(defaultForm());
     loadAll();
@@ -62,6 +88,23 @@ export default function Payments() {
   async function changeStatus(id, estado) {
     await updateDoc(doc(db, 'payments', id), { estado });
     loadAll();
+  }
+
+  async function confirmarCobro() {
+    if (!cobroTarget || !cobroCuentaId) return;
+    setSaving(true);
+    try {
+      const cuentaNombre = cobroCuentaId === 'efectivo' ? 'Efectivo' : (bankAccounts.find(x => x.id === cobroCuentaId)?.nombre || bankAccounts.find(x => x.id === cobroCuentaId)?.banco || '');
+      await updateDoc(doc(db, 'payments', cobroTarget.id), { estado: 'cobrado', cuentaId: cobroCuentaId, cuentaNombre });
+      if (cobroCuentaId !== 'efectivo') {
+        await incrementarSaldo(cobroCuentaId, cobroTarget.monto || 0);
+      }
+      setCobroTarget(null);
+      setCobroCuentaId('');
+      loadAll();
+    } finally {
+      setSaving(false);
+    }
   }
 
   const filtered = filter === 'todos' ? payments : payments.filter(p => p.estado === filter);
@@ -114,7 +157,7 @@ export default function Payments() {
                   <td>
                     {p.estado === 'pendiente' && (
                       <div style={{ display: 'flex', gap: '4px' }}>
-                        <button className="btn btn-sm btn-primary" onClick={() => changeStatus(p.id, 'cobrado')}>✅ Cobrar</button>
+                        <button className="btn btn-sm btn-primary" onClick={() => { setCobroTarget(p); setCobroCuentaId(''); }}>✅ Cobrar</button>
                         <button className="btn btn-sm btn-ghost" onClick={() => changeStatus(p.id, 'vencido')}>❌</button>
                       </div>
                     )}
@@ -166,6 +209,14 @@ export default function Payments() {
                   </select>
                 </div>
               </div>
+              <div className="form-group">
+                <label className="form-label">💳 ¿Dónde ingresó el cobro?</label>
+                <select className="form-select" value={form.cuentaId} onChange={e => handleCuenta(e.target.value)}>
+                  <option value="">Sin especificar</option>
+                  <option value="efectivo">💵 Efectivo</option>
+                  {bankAccounts.map(a => <option key={a.id} value={a.id}>🏦 {a.nombre || a.banco} — {formatSoles(a.saldo || 0)}</option>)}
+                </select>
+              </div>
               {/* IGV preview */}
               {form.monto > 0 && (
                 <div className="igv-box" style={{ marginBottom: '16px' }}>
@@ -187,6 +238,45 @@ export default function Payments() {
                 <button type="submit" className="btn btn-primary">Guardar cobro</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {cobroTarget && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setCobroTarget(null)}>
+          <div className="modal">
+            <div className="modal-header">
+              <h3 className="modal-title">✅ Confirmar cobro</h3>
+              <button className="btn btn-ghost btn-icon" onClick={() => setCobroTarget(null)}>✕</button>
+            </div>
+            <div style={{ background: 'var(--bg-3)', borderRadius: 'var(--radius)', padding: '14px 16px', marginBottom: '20px', borderLeft: '3px solid var(--success)' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text)', marginBottom: '4px' }}>{cobroTarget.pacienteNombre}</div>
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginBottom: '8px' }}>{SERVICIOS.find(s => s.id === cobroTarget.servicio)?.label || cobroTarget.servicio}</div>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--success)', letterSpacing: '-0.03em' }}>{formatSoles(cobroTarget.monto)}</div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">💳 ¿Dónde ingresó este cobro? *</label>
+              <select className="form-select" value={cobroCuentaId} onChange={e => setCobroCuentaId(e.target.value)}>
+                <option value="">Seleccionar fuente...</option>
+                <option value="efectivo">💵 Efectivo</option>
+                {bankAccounts.map(a => <option key={a.id} value={a.id}>🏦 {a.nombre || a.banco} — {formatSoles(a.saldo || 0)}</option>)}
+              </select>
+            </div>
+            {cobroCuentaId && cobroCuentaId !== 'efectivo' && (() => {
+              const cuenta = bankAccounts.find(x => x.id === cobroCuentaId);
+              if (!cuenta) return null;
+              const nuevoSaldo = (cuenta.saldo || 0) + (cobroTarget.monto || 0);
+              return (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--success-light)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: '16px', fontSize: '0.83rem' }}>
+                  <span style={{ color: 'var(--text-3)' }}>Nuevo saldo de <strong>{cuenta.nombre || cuenta.banco}</strong>:</span>
+                  <strong style={{ color: 'var(--success)' }}>{formatSoles(nuevoSaldo)}</strong>
+                </div>
+              );
+            })()}
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setCobroTarget(null)}>Cancelar</button>
+              <button className="btn btn-primary" disabled={!cobroCuentaId || saving} onClick={confirmarCobro}>{saving ? 'Guardando...' : 'Confirmar cobro'}</button>
+            </div>
           </div>
         </div>
       )}

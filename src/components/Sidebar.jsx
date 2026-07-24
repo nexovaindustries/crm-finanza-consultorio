@@ -47,6 +47,14 @@ const Icons = {
       <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
     </svg>
   ),
+  Banks: () => (
+    <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.8" xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="6" width="20" height="13" rx="2.5"/>
+      <path d="M2 10h20"/>
+      <circle cx="7" cy="15" r="1.5" fill="currentColor" stroke="none"/>
+      <circle cx="11" cy="15" r="1.5" fill="currentColor" stroke="none"/>
+    </svg>
+  ),
   Reports: () => (
     <svg viewBox="0 0 24 24" fill="none" strokeWidth="1.8" xmlns="http://www.w3.org/2000/svg">
       <path d="M18 20V10M12 20V4M6 20v-6"/>
@@ -88,6 +96,7 @@ const nav = [
   { section: 'Finanzas', items: [
     { to: '/expenses', label: 'Gastos', Icon: Icons.Expenses },
     { to: '/reports', label: 'Reportes', Icon: Icons.Reports },
+    { to: '/banks', label: 'Cuentas Bancarias', Icon: Icons.Banks },
   ]},
   { section: 'Sistema', items: [
     { to: '/terms', label: 'Términos y Condiciones', Icon: Icons.Terms },
@@ -95,7 +104,7 @@ const nav = [
   ]},
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ open, onClose }) {
   const { profile, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -105,13 +114,18 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
+    <aside className={`sidebar ${open ? 'open' : ''}`}>
+      <div className="sidebar-logo" style={{ position: 'relative' }}>
         <img
           src="/logo.png"
           alt="Madurando Talentos"
           style={{ maxWidth: '100%', height: 'auto', maxHeight: '72px', display: 'block', margin: '0 auto' }}
         />
+        <button className="sidebar-close-btn" onClick={onClose} aria-label="Cerrar menú">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
       </div>
 
       <nav className="sidebar-nav">
@@ -124,6 +138,7 @@ export default function Sidebar() {
                 to={item.to}
                 end={item.to === '/'}
                 className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                onClick={onClose}
               >
                 <item.Icon />
                 {item.label}

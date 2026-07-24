@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, Timestamp, where } from 'firebase/firestore';
-import { formatDate, esCumpleanosHoy, cumpleanosProximo, getInitials, formatSoles, esMenorDeEdad } from '../utils';
+import { formatDate, esCumpleanosHoy, cumpleanosProximo, getInitials, formatSoles, esMenorDeEdad, getSesionesPaquete, getEdadTexto, GRADOS_ESCOLARES, getAnioEscolarActual, getGradoActual } from '../utils';
 
 export default function Patients() {
   const [patients, setPatients] = useState([]);
@@ -21,6 +21,7 @@ export default function Patients() {
     return {
       nombre: '', dni: '', fechaNacimiento: '', telefono: '', email: '', direccion: '', notas: '', estado: 'activo', servicio: 'entrada',
       apoderado_nombre: '', apoderado_dni: '', apoderado_telefono: '', apoderado_email: '', apoderado_relacion: 'madre',
+      colegio: '', grado: '',
     };
   }
 
@@ -34,8 +35,10 @@ export default function Patients() {
 
   async function savePatient(e) {
     e.preventDefault();
+    const gradoCambio = !selected || selected.grado !== form.grado;
     const data = {
       ...form,
+      gradoAnioReferencia: form.grado ? (gradoCambio ? getAnioEscolarActual() : selected.gradoAnioReferencia) : null,
       updatedAt: Timestamp.now(),
     };
     if (selected && modalMode === 'edit') {
@@ -86,6 +89,7 @@ export default function Patients() {
       apoderado_nombre: p.apoderado_nombre || '', apoderado_dni: p.apoderado_dni || '',
       apoderado_telefono: p.apoderado_telefono || '', apoderado_email: p.apoderado_email || '',
       apoderado_relacion: p.apoderado_relacion || 'madre',
+      colegio: p.colegio || '', grado: p.grado || '',
     });
     setModalMode('edit');
     setShowModal(true);
@@ -174,6 +178,11 @@ export default function Patients() {
                             Apoderado: {p.apoderado_nombre}
                           </div>
                         )}
+                        {esMenorDeEdad(p.fechaNacimiento) && p.grado && (
+                          <div style={{ fontSize: '11px', color: 'var(--text-3)', marginTop: '2px' }}>
+                            🎒 {getGradoActual(p.grado, p.gradoAnioReferencia)}{p.colegio ? ` — ${p.colegio}` : ''}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -185,6 +194,7 @@ export default function Patients() {
                       <span style={{ color: cumple ? 'var(--accent)' : 'inherit' }}>
                         {formatDate(p.fechaNacimiento)}
                         {cumple && <span style={{ marginLeft: '4px', fontSize: '10px', background: 'rgba(232,168,124,0.2)', color: 'var(--accent)', padding: '1px 5px', borderRadius: '4px' }}>HOY</span>}
+                        <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{getEdadTexto(p.fechaNacimiento)}</div>
                       </span>
                     ) : '—'}
                   </td>
@@ -266,6 +276,14 @@ export default function Patients() {
             
             {modalMode === 'history' ? (
               <div style={{ padding: '0 20px 20px' }}>
+                {selected?.fechaNacimiento && (
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginBottom: '12px' }}>
+                    Edad: <strong style={{ color: 'var(--text-1)' }}>{getEdadTexto(selected.fechaNacimiento)}</strong>
+                    {esMenorDeEdad(selected.fechaNacimiento) && selected?.grado && (
+                      <span> · 🎒 <strong style={{ color: 'var(--text-1)' }}>{getGradoActual(selected.grado, selected.gradoAnioReferencia)}</strong>{selected.colegio ? ` — ${selected.colegio}` : ''}</span>
+                    )}
+                  </div>
+                )}
                 {esMenorDeEdad(selected?.fechaNacimiento) && selected?.apoderado_nombre && (
                   <div style={{ background: 'rgba(255,203,5,0.08)', border: '1px solid rgba(255,203,5,0.4)', borderRadius: 'var(--radius)', padding: '10px 14px', marginBottom: '16px', fontSize: '0.82rem' }}>
                     <strong style={{ color: 'var(--accent)' }}>Apoderado:</strong>{' '}
@@ -282,7 +300,9 @@ export default function Patients() {
 
                 {historyLoading ? (
                   <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-3)' }}>Cargando historial...</div>
-                ) : historyTab === 'citas' ? (
+                ) : historyTab === 'citas' ? (() => {
+                  const sesionesHistorial = getSesionesPaquete(history.appointments);
+                  return (
                   <div className="table-wrap" style={{ maxHeight: '300px', overflowY: 'auto' }}>
                     <table>
                       <thead><tr><th>Fecha</th><th>Hora</th><th>Servicio</th><th>Estado</th></tr></thead>
@@ -291,11 +311,12 @@ export default function Patients() {
                           <tr><td colSpan="4" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-3)' }}>Sin citas registradas</td></tr>
                         ) : history.appointments.map(a => {
                           const d = a.fecha?.toDate ? a.fecha.toDate() : new Date(a.fecha);
+                          const sesion = sesionesHistorial[a.id];
                           return (
                             <tr key={a.id}>
                               <td>{d.toLocaleDateString('es-PE')}</td>
                               <td>{d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</td>
-                              <td>{a.tipo}</td>
+                              <td>{a.tipo === 'paquete4' && sesion ? `Paquete · Sesión ${sesion.sesion}/${sesion.total}` : a.tipo}</td>
                               <td>
                                 <span className={`badge badge-${a.estado === 'completada' ? 'success' : a.estado === 'cancelada' ? 'danger' : 'info'}`}>
                                   {a.estado}
@@ -307,7 +328,8 @@ export default function Patients() {
                       </tbody>
                     </table>
                   </div>
-                ) : (
+                  );
+                })() : (
                   <div className="table-wrap" style={{ maxHeight: '300px', overflowY: 'auto' }}>
                     <table>
                       <thead><tr><th>Fecha</th><th>Servicio</th><th>Monto</th><th>Estado</th></tr></thead>
@@ -420,6 +442,22 @@ export default function Patients() {
                     <div className="form-group">
                       <label className="form-label">Correo del apoderado</label>
                       <input className="form-input" type="email" value={form.apoderado_email} onChange={e => setForm({...form, apoderado_email: e.target.value})} placeholder="correo@ejemplo.com" />
+                    </div>
+                    <div className="form-row">
+                      <div className="form-group">
+                        <label className="form-label">Colegio</label>
+                        <input className="form-input" value={form.colegio} onChange={e => setForm({...form, colegio: e.target.value})} placeholder="Nombre del colegio" />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label">Grado actual</label>
+                        <select className="form-select" value={form.grado} onChange={e => setForm({...form, grado: e.target.value})}>
+                          <option value="">Seleccionar...</option>
+                          {GRADOS_ESCOLARES.map(g => <option key={g} value={g}>{g}</option>)}
+                        </select>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: '4px' }}>
+                          Se actualiza automáticamente cada año escolar
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}

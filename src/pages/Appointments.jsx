@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, updateDoc, doc, query, orderBy, Timestamp } from 'firebase/firestore';
-import { formatDate, formatSoles, PRECIO_SESION_ENTRADA, PRECIO_PAQUETE_4 } from '../utils';
+import { formatSoles, PRECIO_SESION_ENTRADA, PRECIO_PAQUETE_4, getSesionesPaquete } from '../utils';
+import TimeInput from '../components/TimeInput';
 
 const ESTADOS = { programada: 'info', completada: 'success', cancelada: 'danger', reprogramada: 'warning' };
 
@@ -12,6 +13,9 @@ export default function Appointments() {
   const [filter, setFilter] = useState('todos');
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(defaultForm());
+  const [reprogModal, setReprogModal] = useState(false);
+  const [reprogTarget, setReprogTarget] = useState(null);
+  const [reprogForm, setReprogForm] = useState({ fecha: '', hora: '10:00' });
 
   function defaultForm() {
     const now = new Date();
@@ -23,6 +27,7 @@ export default function Appointments() {
       estado: 'programada',
       notas: '',
       generarCobro: true,
+      precioEspecial: '',
     };
   }
 
@@ -43,6 +48,13 @@ export default function Appointments() {
     setForm(f => ({ ...f, pacienteId: id, pacienteNombre: p?.nombre || '' }));
   };
 
+  // Sesión que le tocaría a la nueva cita si es de tipo paquete4
+  const proximaSesionPaquete = (() => {
+    if (form.tipo !== 'paquete4' || !form.pacienteId) return null;
+    const previas = appointments.filter(a => a.pacienteId === form.pacienteId && a.tipo === 'paquete4' && a.estado !== 'cancelada').length;
+    return { sesion: (previas % 4) + 1, total: 4 };
+  })();
+
   async function saveAppointment(e) {
     e.preventDefault();
     const fechaHora = new Date(`${form.fecha}T${form.hora}:00`);
@@ -59,7 +71,9 @@ export default function Appointments() {
 
     // Auto-generar cobro pendiente si se marcó
     if (form.generarCobro) {
-      const monto = form.tipo === 'paquete4' ? PRECIO_PAQUETE_4 : form.tipo === 'entrada' ? PRECIO_SESION_ENTRADA : 0;
+      const precioBase = form.tipo === 'paquete4' ? PRECIO_PAQUETE_4 : form.tipo === 'entrada' ? PRECIO_SESION_ENTRADA : 0;
+      const tienePrecioEspecial = form.precioEspecial !== '' && !isNaN(Number(form.precioEspecial));
+      const monto = tienePrecioEspecial ? Number(form.precioEspecial) : precioBase;
       if (monto > 0) {
         const { calcularIGV } = await import('../utils');
         const igv = calcularIGV(monto);
@@ -70,6 +84,7 @@ export default function Appointments() {
           monto,
           baseImponible: igv.base,
           igv: igv.igv,
+          precioEspecial: tienePrecioEspecial,
           estado: 'pendiente',
           citaId: apptRef.id,
           fecha: Timestamp.fromDate(fechaHora),
@@ -88,7 +103,38 @@ export default function Appointments() {
     loadAll();
   }
 
+  // Solo se puede reprogramar si faltan al menos 24 horas para la cita
+  const puedeReprogramar = (a) => {
+    const d = a.fecha?.toDate ? a.fecha.toDate() : new Date(a.fecha);
+    return (d.getTime() - Date.now()) >= 24 * 60 * 60 * 1000;
+  };
+
+  const openReprogramar = (a) => {
+    if (!puedeReprogramar(a)) {
+      alert('Esta cita ya no se puede reprogramar: falta menos de 24 horas.');
+      return;
+    }
+    const d = a.fecha?.toDate ? a.fecha.toDate() : new Date(a.fecha);
+    setReprogTarget(a);
+    setReprogForm({ fecha: d.toISOString().split('T')[0], hora: `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` });
+    setReprogModal(true);
+  };
+
+  async function confirmReprogramar(e) {
+    e.preventDefault();
+    const fechaHora = new Date(`${reprogForm.fecha}T${reprogForm.hora}:00`);
+    await updateDoc(doc(db, 'appointments', reprogTarget.id), {
+      fecha: Timestamp.fromDate(fechaHora),
+      fechaAnterior: reprogTarget.fecha,
+      reprogramada: true,
+    });
+    setReprogModal(false);
+    setReprogTarget(null);
+    loadAll();
+  }
+
   const filtered = filter === 'todos' ? appointments : appointments.filter(a => a.estado === filter);
+  const sesionesPaquete = getSesionesPaquete(appointments);
 
   const today = new Date().toDateString();
   const todayAppts = appointments.filter(a => {
@@ -137,19 +183,28 @@ export default function Appointments() {
                   <td style={{ color: 'var(--text-3)' }}>{d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}</td>
                   <td>
                     <span className="badge badge-neutral">
-                      {a.tipo === 'entrada' ? 'Entrada' : a.tipo === 'paquete4' ? 'Paquete 4' : 'Individual'}
+                      {a.tipo === 'entrada' ? 'Entrada' : a.tipo === 'paquete4' ? `Paquete · Sesión ${sesionesPaquete[a.id]?.sesion ?? '?'}/${sesionesPaquete[a.id]?.total ?? 4}` : 'Individual'}
                     </span>
                   </td>
                   <td>
                     <span className={`badge badge-${ESTADOS[a.estado] || 'neutral'}`}>
                       {a.estado === 'programada' ? '📅 Programada' : a.estado === 'completada' ? '✅ Completada' : a.estado === 'cancelada' ? '❌ Cancelada' : '🔄 Reprogramada'}
                     </span>
+                    {a.reprogramada && a.estado === 'programada' && (
+                      <span className="badge badge-warning" style={{ marginLeft: '4px', fontSize: '0.65rem' }}>Reprogramada</span>
+                    )}
                   </td>
                   <td style={{ color: 'var(--text-3)', fontSize: '0.8rem', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.notas || '—'}</td>
                   <td>
                     {a.estado === 'programada' && (
                       <div style={{ display: 'flex', gap: '4px' }}>
                         <button className="btn btn-sm btn-primary" onClick={() => changeStatus(a.id, 'completada')}>✅</button>
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          onClick={() => openReprogramar(a)}
+                          title={puedeReprogramar(a) ? 'Reprogramar' : 'Solo se puede reprogramar con 24h de anticipación'}
+                          style={!puedeReprogramar(a) ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
+                        >🔄</button>
                         <button className="btn btn-sm btn-ghost" onClick={() => changeStatus(a.id, 'cancelada')}>❌</button>
                       </div>
                     )}
@@ -185,7 +240,7 @@ export default function Appointments() {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Hora *</label>
-                  <input className="form-input" type="time" required value={form.hora} onChange={e => setForm({...form, hora: e.target.value})} />
+                  <TimeInput value={form.hora} onChange={hora => setForm({...form, hora})} />
                 </div>
               </div>
               <div className="form-row">
@@ -196,6 +251,11 @@ export default function Appointments() {
                     <option value="paquete4">Paquete 4 sesiones (S/. 650)</option>
                     <option value="sesion_suelta">Sesión individual</option>
                   </select>
+                  {proximaSesionPaquete && (
+                    <div style={{ marginTop: '6px', fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                      Esta será la sesión <strong>{proximaSesionPaquete.sesion}/{proximaSesionPaquete.total}</strong> del paquete
+                    </div>
+                  )}
                 </div>
                 <div className="form-group">
                   <label className="form-label">Estado</label>
@@ -212,6 +272,20 @@ export default function Appointments() {
                   <span className="form-label" style={{ margin: 0 }}>Generar cobro pendiente automáticamente</span>
                 </label>
               </div>
+              {form.generarCobro && (
+                <div className="form-group">
+                  <label className="form-label">Precio especial / descuento (opcional)</label>
+                  <input
+                    className="form-input"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder={`Precio normal: ${formatSoles(form.tipo === 'paquete4' ? PRECIO_PAQUETE_4 : form.tipo === 'entrada' ? PRECIO_SESION_ENTRADA : 0)}`}
+                    value={form.precioEspecial}
+                    onChange={e => setForm({...form, precioEspecial: e.target.value})}
+                  />
+                </div>
+              )}
               <div className="form-group">
                 <label className="form-label">Notas</label>
                 <textarea className="form-textarea" value={form.notas} onChange={e => setForm({...form, notas: e.target.value})} placeholder="Observaciones de la cita..." style={{ minHeight: '60px' }} />
@@ -219,6 +293,36 @@ export default function Appointments() {
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
                 <button type="submit" className="btn btn-primary">Guardar cita</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {reprogModal && reprogTarget && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setReprogModal(false)}>
+          <div className="modal" style={{ maxWidth: '420px' }}>
+            <div className="modal-header">
+              <h3 className="modal-title">Reprogramar cita</h3>
+              <button className="btn btn-ghost btn-icon" onClick={() => setReprogModal(false)}>✕</button>
+            </div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-3)', marginBottom: '14px' }}>
+              {reprogTarget.pacienteNombre}
+            </div>
+            <form onSubmit={confirmReprogramar}>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Nueva fecha *</label>
+                  <input className="form-input" type="date" required value={reprogForm.fecha} onChange={e => setReprogForm({...reprogForm, fecha: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Nueva hora *</label>
+                  <TimeInput value={reprogForm.hora} onChange={hora => setReprogForm({...reprogForm, hora})} />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setReprogModal(false)}>Cancelar</button>
+                <button type="submit" className="btn btn-primary">Confirmar reprogramación</button>
               </div>
             </form>
           </div>

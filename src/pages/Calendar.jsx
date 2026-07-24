@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, query, Timestamp } from 'firebase/firestore';
-import { esCumpleanosHoy } from '../utils';
+import { parseLocalDate } from '../utils';
+import TimeInput from '../components/TimeInput';
 
 const DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -61,7 +62,7 @@ export default function Calendar() {
   const getBirthdaysForDay = (cell) => {
     return patients.filter(p => {
       if (!p.fechaNacimiento) return false;
-      const nac = new Date(p.fechaNacimiento);
+      const nac = parseLocalDate(p.fechaNacimiento);
       return nac.getDate() === cell.day && nac.getMonth() === cell.month;
     });
   };
@@ -142,15 +143,10 @@ export default function Calendar() {
                 onClick={() => openDay(cell)}
               >
                 <div className="cal-date">{cell.day}</div>
-                {appts.slice(0, 2).map(a => (
-                  <div key={a.id} className="cal-event cal-event-appt">
-                    {a.fecha?.toDate ? a.fecha.toDate().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : ''} {a.pacienteNombre}
-                  </div>
-                ))}
-                {appts.length > 2 && <div style={{ fontSize: '0.6rem', color: 'var(--text-3)', marginTop: '2px' }}>+{appts.length - 2} más</div>}
-                {birthdays.map(p => (
-                  <div key={p.id} className="cal-event cal-event-birthday">🎂 {p.nombre.split(' ')[0]}</div>
-                ))}
+                <div className="cal-summary">
+                  {appts.length > 0 && <span className="cal-chip cal-chip-appt">{appts.length} {appts.length === 1 ? 'cita' : 'citas'}</span>}
+                  {hasBirthday && <span className="cal-chip cal-chip-birthday">🎂</span>}
+                </div>
               </div>
             );
           })}
@@ -209,7 +205,7 @@ export default function Calendar() {
               <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Hora</label>
-                  <input className="form-input" type="time" value={form.hora} onChange={e => setForm({...form, hora: e.target.value})} />
+                  <TimeInput value={form.hora} onChange={hora => setForm({...form, hora})} />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Tipo</label>

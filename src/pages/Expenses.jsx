@@ -5,22 +5,36 @@ import { formatDate, formatSoles, CATEGORIAS_GASTO } from '../utils';
 
 export default function Expenses() {
   const [expenses, setExpenses] = useState([]);
+  const [bankAccounts, setBankAccounts] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [tab, setTab] = useState('todos');
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(defaultForm());
 
   function defaultForm() {
-    return { descripcion: '', monto: '', categoria: 'Alquiler', fecha: new Date().toISOString().split('T')[0], recurrente: false, frecuencia: 'mensual', notas: '' };
+    return { descripcion: '', monto: '', categoria: 'Alquiler', fecha: new Date().toISOString().split('T')[0], recurrente: false, frecuencia: 'mensual', cuentaId: '', cuentaNombre: '', notas: '' };
   }
 
   useEffect(() => { loadExpenses(); }, []);
 
   async function loadExpenses() {
-    const snap = await getDocs(query(collection(db, 'expenses'), orderBy('fecha', 'desc')));
-    setExpenses(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    const [expSnap, bankSnap] = await Promise.all([
+      getDocs(query(collection(db, 'expenses'), orderBy('fecha', 'desc'))),
+      getDocs(query(collection(db, 'bank_accounts'), orderBy('banco'))),
+    ]);
+    setExpenses(expSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+    setBankAccounts(bankSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     setLoading(false);
   }
+
+  const handleCuenta = (cuentaId) => {
+    if (cuentaId === 'efectivo') {
+      setForm(f => ({ ...f, cuentaId: 'efectivo', cuentaNombre: 'Efectivo' }));
+    } else {
+      const c = bankAccounts.find(x => x.id === cuentaId);
+      setForm(f => ({ ...f, cuentaId, cuentaNombre: c ? (c.nombre || c.banco) : '' }));
+    }
+  };
 
   async function saveExpense(e) {
     e.preventDefault();
@@ -30,6 +44,12 @@ export default function Expenses() {
       fecha: Timestamp.fromDate(new Date(form.fecha)),
       createdAt: Timestamp.now(),
     });
+    if (form.cuentaId && form.cuentaId !== 'efectivo') {
+      const cuenta = bankAccounts.find(x => x.id === form.cuentaId);
+      if (cuenta) {
+        await updateDoc(doc(db, 'bank_accounts', form.cuentaId), { saldo: (cuenta.saldo || 0) - Number(form.monto), updatedAt: Timestamp.now() });
+      }
+    }
     setShowModal(false);
     setForm(defaultForm());
     loadExpenses();
@@ -135,6 +155,14 @@ export default function Expenses() {
                   </select>
                 </div>
               )}
+              <div className="form-group">
+                <label className="form-label">💳 ¿De dónde salió el pago?</label>
+                <select className="form-select" value={form.cuentaId} onChange={e => handleCuenta(e.target.value)}>
+                  <option value="">Sin especificar</option>
+                  <option value="efectivo">💵 Efectivo</option>
+                  {bankAccounts.map(a => <option key={a.id} value={a.id}>🏦 {a.nombre || a.banco} — {formatSoles(a.saldo || 0)}</option>)}
+                </select>
+              </div>
               <div className="form-group">
                 <label className="form-label">Notas</label>
                 <textarea className="form-textarea" value={form.notas} onChange={e => setForm({...form, notas: e.target.value})} placeholder="Detalles adicionales..." style={{ minHeight: '60px' }} />
