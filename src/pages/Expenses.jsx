@@ -37,7 +37,7 @@ export default function Expenses() {
     await addDoc(collection(db, 'expenses'), {
       ...form,
       monto: Number(form.monto),
-      fecha: Timestamp.fromDate(new Date(form.fecha)),
+      fecha: Timestamp.fromDate(new Date(`${form.fecha}T12:00:00`)),
       createdAt: Timestamp.now(),
     });
     const cuenta = bankAccounts.find(x => x.id === form.cuentaId);

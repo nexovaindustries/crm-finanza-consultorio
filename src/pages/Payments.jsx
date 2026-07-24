@@ -31,7 +31,11 @@ export default function Payments() {
   }
 
   function defaultForm() {
-    return { pacienteId: '', pacienteNombre: '', servicio: 'entrada', monto: PRECIO_SESION_ENTRADA, fecha: new Date().toISOString().split('T')[0], estado: 'cobrado', cuentaId: '', cuentaNombre: '', notas: '' };
+    return {
+      pacienteId: '', pacienteNombre: '', servicio: 'entrada', monto: PRECIO_SESION_ENTRADA,
+      sesionesCubre: 1, montoAbono: '',
+      fecha: new Date().toISOString().split('T')[0], estado: 'cobrado', cuentaId: '', cuentaNombre: '', notas: '',
+    };
   }
 
   useEffect(() => { loadAll(); }, []);
@@ -62,7 +66,14 @@ export default function Payments() {
 
   const handleServicio = (servicioId) => {
     const s = SERVICIOS.find(x => x.id === servicioId);
-    setForm(f => ({ ...f, servicio: servicioId, monto: s ? s.precio : 0 }));
+    const precio = s ? s.precio : 0;
+    setForm(f => ({
+      ...f,
+      servicio: servicioId,
+      monto: precio,
+      sesionesCubre: 1,
+      montoAbono: servicioId === 'paquete4' ? (precio / 4).toFixed(2) : '',
+    }));
   };
 
   const handlePaciente = (id) => {
@@ -73,21 +84,44 @@ export default function Payments() {
   async function savePayment(e) {
     e.preventDefault();
     if (!form.pacienteId) { alert('Selecciona un paciente de la lista.'); return; }
-    const igv = calcularIGV(Number(form.monto));
-    const pagadoDeUna = form.estado === 'cobrado';
-    await addDoc(collection(db, 'payments'), {
-      ...form,
-      monto: Number(form.monto),
-      baseImponible: igv.base,
-      igv: igv.igv,
-      fecha: Timestamp.fromDate(new Date(form.fecha)),
-      createdAt: Timestamp.now(),
-      montoPagado: pagadoDeUna ? Number(form.monto) : 0,
-      sesionesPagadas: pagadoDeUna && form.servicio === 'paquete4' ? 4 : 0,
-      abonos: [],
-    });
-    if (pagadoDeUna && form.cuentaId) {
-      await incrementarSaldo(form.cuentaId, Number(form.monto));
+    const fecha = Timestamp.fromDate(new Date(`${form.fecha}T12:00:00`));
+
+    if (form.servicio === 'paquete4') {
+      const montoTotal = PRECIO_PAQUETE_4;
+      const montoAbono = Number(form.montoAbono) || 0;
+      const sesiones = Math.min(Number(form.sesionesCubre) || 0, 4);
+      const igv = calcularIGV(montoTotal);
+      const estado = montoAbono >= montoTotal ? 'cobrado' : 'pendiente';
+      const primerAbono = { cuentaId: form.cuentaId, cuentaNombre: form.cuentaNombre, sesiones, monto: montoAbono, fecha: Timestamp.now() };
+      await addDoc(collection(db, 'payments'), {
+        pacienteId: form.pacienteId, pacienteNombre: form.pacienteNombre,
+        servicio: 'paquete4', monto: montoTotal,
+        baseImponible: igv.base, igv: igv.igv,
+        fecha, createdAt: Timestamp.now(),
+        estado, montoPagado: montoAbono, sesionesPagadas: sesiones,
+        abonos: [primerAbono],
+        cuentaId: form.cuentaId, cuentaNombre: form.cuentaNombre,
+        notas: form.notas,
+      });
+      if (form.cuentaId && montoAbono > 0) {
+        await incrementarSaldo(form.cuentaId, montoAbono);
+      }
+    } else {
+      const igv = calcularIGV(Number(form.monto));
+      const pagadoDeUna = form.estado === 'cobrado';
+      await addDoc(collection(db, 'payments'), {
+        pacienteId: form.pacienteId, pacienteNombre: form.pacienteNombre,
+        servicio: form.servicio, monto: Number(form.monto),
+        baseImponible: igv.base, igv: igv.igv,
+        fecha, createdAt: Timestamp.now(),
+        estado: form.estado, montoPagado: pagadoDeUna ? Number(form.monto) : 0,
+        sesionesPagadas: 0, abonos: [],
+        cuentaId: form.cuentaId, cuentaNombre: form.cuentaNombre,
+        notas: form.notas,
+      });
+      if (pagadoDeUna && form.cuentaId) {
+        await incrementarSaldo(form.cuentaId, Number(form.monto));
+      }
     }
     setShowModal(false);
     setForm(defaultForm());
@@ -254,23 +288,41 @@ export default function Payments() {
                     {SERVICIOS.map(s => <option key={s.id} value={s.id}>{s.label}{s.precio > 0 ? ` — S/. ${s.precio}` : ''}</option>)}
                   </select>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Monto (S/.) *</label>
-                  <input className="form-input" type="number" required min="0" step="0.01" value={form.monto} onChange={e => setForm({...form, monto: e.target.value})} />
-                </div>
+                {form.servicio !== 'paquete4' && (
+                  <div className="form-group">
+                    <label className="form-label">Monto (S/.) *</label>
+                    <input className="form-input" type="number" required min="0" step="0.01" value={form.monto} onChange={e => setForm({...form, monto: e.target.value})} />
+                  </div>
+                )}
               </div>
+
+              {form.servicio === 'paquete4' && (
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Sesión(es) que cubre este pago *</label>
+                    <input className="form-input" type="number" required min="1" max="4" value={form.sesionesCubre} onChange={e => setForm({...form, sesionesCubre: e.target.value})} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Monto a pagar ahora (S/.) *</label>
+                    <input className="form-input" type="number" required min="0.01" step="0.01" max={PRECIO_PAQUETE_4} value={form.montoAbono} onChange={e => setForm({...form, montoAbono: e.target.value})} />
+                  </div>
+                </div>
+              )}
+
               <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Fecha *</label>
                   <input className="form-input" type="date" required value={form.fecha} onChange={e => setForm({...form, fecha: e.target.value})} />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Estado</label>
-                  <select className="form-select" value={form.estado} onChange={e => setForm({...form, estado: e.target.value})}>
-                    <option value="cobrado">✅ Cobrado</option>
-                    <option value="pendiente">⏳ Pendiente</option>
-                  </select>
-                </div>
+                {form.servicio !== 'paquete4' && (
+                  <div className="form-group">
+                    <label className="form-label">Estado</label>
+                    <select className="form-select" value={form.estado} onChange={e => setForm({...form, estado: e.target.value})}>
+                      <option value="cobrado">✅ Cobrado</option>
+                      <option value="pendiente">⏳ Pendiente</option>
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">💳 ¿Dónde ingresó el cobro? *</label>
@@ -279,8 +331,22 @@ export default function Payments() {
                   {bankAccounts.map(a => <option key={a.id} value={a.id}>🏦 {a.nombre || a.banco} — {formatSoles(a.saldo || 0)}</option>)}
                 </select>
               </div>
-              {/* IGV preview */}
-              {form.monto > 0 && (
+
+              {form.servicio === 'paquete4' ? (
+                (() => {
+                  const montoAbono = Number(form.montoAbono) || 0;
+                  const restante = Math.max(PRECIO_PAQUETE_4 - montoAbono, 0);
+                  const sesiones = Math.min(Number(form.sesionesCubre) || 0, 4);
+                  return (
+                    <div className="igv-box" style={{ marginBottom: '16px' }}>
+                      <div className="igv-row"><span style={{color:'var(--text-3)'}}>Total del paquete</span><span>{formatSoles(PRECIO_PAQUETE_4)}</span></div>
+                      <div className="igv-row"><span style={{color:'var(--text-3)'}}>Pagas ahora</span><span>{formatSoles(montoAbono)}</span></div>
+                      <div className="igv-row total"><span>Saldo restante</span><span>{formatSoles(restante)}</span></div>
+                      <div className="igv-row"><span style={{color:'var(--text-3)'}}>Sesiones cubiertas</span><span>{sesiones}/4</span></div>
+                    </div>
+                  );
+                })()
+              ) : form.monto > 0 && (
                 <div className="igv-box" style={{ marginBottom: '16px' }}>
                   {(() => { const igv = calcularIGV(Number(form.monto)); return (
                     <>
