@@ -159,7 +159,7 @@ export default function Appointments() {
       )}
 
       <div className="tabs">
-        {[['todos','Todas'],['programada','Programadas'],['completada','Completadas'],['cancelada','Canceladas']].map(([val, lbl]) => (
+        {[['todos','Todas'],['programada','Programadas'],['completada','Completadas'],['cancelada','Anuladas']].map(([val, lbl]) => (
           <button key={val} className={`tab-btn ${filter === val ? 'active' : ''}`} onClick={() => setFilter(val)}>{lbl}</button>
         ))}
       </div>
@@ -188,7 +188,7 @@ export default function Appointments() {
                   </td>
                   <td>
                     <span className={`badge badge-${ESTADOS[a.estado] || 'neutral'}`}>
-                      {a.estado === 'programada' ? '📅 Programada' : a.estado === 'completada' ? '✅ Completada' : a.estado === 'cancelada' ? '❌ Cancelada' : '🔄 Reprogramada'}
+                      {a.estado === 'programada' ? '📅 Programada' : a.estado === 'completada' ? '✅ Completada' : a.estado === 'cancelada' ? '❌ Anulada' : '🔄 Reprogramada'}
                     </span>
                     {a.reprogramada && a.estado === 'programada' && (
                       <span className="badge badge-warning" style={{ marginLeft: '4px', fontSize: '0.65rem' }}>Reprogramada</span>
@@ -205,7 +205,7 @@ export default function Appointments() {
                           title={puedeReprogramar(a) ? 'Reprogramar' : 'Solo se puede reprogramar con 24h de anticipación'}
                           style={!puedeReprogramar(a) ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
                         >🔄</button>
-                        <button className="btn btn-sm btn-ghost" onClick={() => changeStatus(a.id, 'cancelada')}>❌</button>
+                        <button className="btn btn-sm btn-ghost" title="Anular cita" onClick={() => changeStatus(a.id, 'cancelada')}>❌</button>
                       </div>
                     )}
                   </td>
@@ -262,7 +262,7 @@ export default function Appointments() {
                   <select className="form-select" value={form.estado} onChange={e => setForm({...form, estado: e.target.value})}>
                     <option value="programada">Programada</option>
                     <option value="completada">Completada</option>
-                    <option value="cancelada">Cancelada</option>
+                    <option value="cancelada">Anulada</option>
                   </select>
                 </div>
               </div>

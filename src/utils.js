@@ -134,6 +134,13 @@ export function getGradoActual(grado, anioReferencia) {
   return GRADOS_ESCOLARES[idxActual];
 }
 
+// Etiqueta legible del estado de una cita ("cancelada" se muestra como "Anulada"
+// para evitar confusión con "pagado", como se usa a veces coloquialmente en Perú)
+export function getEstadoCitaLabel(estado) {
+  const labels = { programada: 'Programada', completada: 'Completada', cancelada: 'Anulada', reprogramada: 'Reprogramada' };
+  return labels[estado] || estado;
+}
+
 // Iniciales de nombre
 export function getInitials(name) {
   if (!name) return '?';

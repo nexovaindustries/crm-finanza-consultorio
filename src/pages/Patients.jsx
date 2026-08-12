@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, orderBy, Timestamp, where } from 'firebase/firestore';
-import { formatDate, esCumpleanosHoy, cumpleanosProximo, getInitials, formatSoles, esMenorDeEdad, getSesionesPaquete, getEdadTexto, GRADOS_ESCOLARES, getAnioEscolarActual, getGradoActual } from '../utils';
+import { formatDate, esCumpleanosHoy, cumpleanosProximo, getInitials, formatSoles, esMenorDeEdad, getSesionesPaquete, getEdadTexto, GRADOS_ESCOLARES, getAnioEscolarActual, getGradoActual, getEstadoCitaLabel } from '../utils';
 
 export default function Patients() {
   const [patients, setPatients] = useState([]);
@@ -15,6 +15,7 @@ export default function Patients() {
   // Historial state
   const [history, setHistory] = useState({ appointments: [], payments: [] });
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
   const [historyTab, setHistoryTab] = useState('citas'); // 'citas', 'pagos'
 
   function defaultForm() {
@@ -101,19 +102,21 @@ export default function Patients() {
     setHistoryTab('citas');
     setShowModal(true);
     setHistoryLoading(true);
-    
+    setHistoryError(null);
+
     try {
       const [appSnap, paySnap] = await Promise.all([
         getDocs(query(collection(db, 'appointments'), where('pacienteId', '==', p.id), orderBy('fecha', 'desc'))),
         getDocs(query(collection(db, 'payments'), where('pacienteId', '==', p.id), orderBy('fecha', 'desc')))
       ]);
-      
+
       setHistory({
         appointments: appSnap.docs.map(d => ({ id: d.id, ...d.data() })),
         payments: paySnap.docs.map(d => ({ id: d.id, ...d.data() }))
       });
     } catch (e) {
       console.error(e);
+      setHistoryError('No se pudo cargar el historial. Intenta de nuevo o avisa al soporte técnico.');
     } finally {
       setHistoryLoading(false);
     }
@@ -293,6 +296,9 @@ export default function Patients() {
                     {selected.apoderado_dni && <span style={{ marginLeft: '10px', color: 'var(--text-3)' }}>DNI: {selected.apoderado_dni}</span>}
                   </div>
                 )}
+                {historyError && (
+                  <div className="alert alert-danger" style={{ marginBottom: '16px' }}>{historyError}</div>
+                )}
                 <div className="tabs" style={{ marginBottom: '20px' }}>
                   <button className={`tab-btn ${historyTab === 'citas' ? 'active' : ''}`} onClick={() => setHistoryTab('citas')}>🗓️ Citas ({history.appointments.length})</button>
                   <button className={`tab-btn ${historyTab === 'pagos' ? 'active' : ''}`} onClick={() => setHistoryTab('pagos')}>💰 Pagos ({history.payments.length})</button>
@@ -319,7 +325,7 @@ export default function Patients() {
                               <td>{a.tipo === 'paquete4' && sesion ? `Paquete · Sesión ${sesion.sesion}/${sesion.total}` : a.tipo}</td>
                               <td>
                                 <span className={`badge badge-${a.estado === 'completada' ? 'success' : a.estado === 'cancelada' ? 'danger' : 'info'}`}>
-                                  {a.estado}
+                                  {getEstadoCitaLabel(a.estado)}
                                 </span>
                               </td>
                             </tr>
