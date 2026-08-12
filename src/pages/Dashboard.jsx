@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db } from '../firebase';
 import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
-import { formatSoles, formatDate, esCumpleanosHoy, cumpleanosProximo } from '../utils';
+import { formatSoles, esCumpleanosHoy, cumpleanosProximo } from '../utils';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 
@@ -59,12 +59,12 @@ export default function Dashboard() {
   const [chartData, setChartData] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [pendingList, setPendingList] = useState([]);
+  const [todayAppts, setTodayAppts] = useState([]);
+  const [birthdayIds, setBirthdayIds] = useState(new Set());
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  useEffect(() => { loadData(); }, []);
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     try {
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -98,16 +98,34 @@ export default function Dashboard() {
 
       const patSnap = await getDocs(query(collection(db, 'patients'), where('estado', '==', 'activo')));
       let pacientes = patSnap.size;
+      const birthdaySet = new Set();
 
       const alertList = [];
       patSnap.forEach(d => {
         const p = d.data();
         if (esCumpleanosHoy(p.fechaNacimiento)) {
-          alertList.push({ type: 'birthday_today', msg: `Hoy es el cumpleaños de ${p.nombre}`, color: 'warning' });
+          birthdaySet.add(d.id);
+          alertList.push({ type: 'birthday_today', msg: `Hoy es el cumpleaños de ${p.nombre} — no contactar`, color: 'warning' });
         } else if (cumpleanosProximo(p.fechaNacimiento, 3)) {
           alertList.push({ type: 'birthday_soon', msg: `Cumpleaños próximo: ${p.nombre} (en menos de 3 días)`, color: 'info' });
         }
       });
+
+      // Citas de hoy, ordenadas por hora
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+      const todaySnap = await getDocs(query(
+        collection(db, 'appointments'),
+        where('fecha', '>=', Timestamp.fromDate(todayStart)),
+        where('fecha', '<=', Timestamp.fromDate(todayEnd))
+      ));
+      const todayList = todaySnap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => {
+          const da = a.fecha?.toDate ? a.fecha.toDate() : new Date(a.fecha);
+          const dbb = b.fecha?.toDate ? b.fecha.toDate() : new Date(b.fecha);
+          return da - dbb;
+        });
 
       const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
       const tomorrowEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 23, 59, 59);
@@ -131,25 +149,60 @@ export default function Dashboard() {
         alertList.push({ type: 'payments_overdue', msg: `Hay ${vencidosCount} cobro(s) pendiente(s) de citas pasadas.`, color: 'danger' });
       }
 
+      // Ingresos y gastos reales de los últimos 6 meses, para la gráfica
+      const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+      const [chartPaySnap, chartExpSnap] = await Promise.all([
+        getDocs(query(collection(db, 'payments'), where('fecha', '>=', Timestamp.fromDate(sixMonthsAgo)), where('fecha', '<=', Timestamp.fromDate(endOfMonth)))),
+        getDocs(query(collection(db, 'expenses'), where('fecha', '>=', Timestamp.fromDate(sixMonthsAgo)), where('fecha', '<=', Timestamp.fromDate(endOfMonth)))),
+      ]);
       const months = [];
       for (let i = 5; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        months.push({ mes: d.toLocaleDateString('es-PE', { month: 'short' }), ingresos: 0, gastos: 0 });
+        months.push({ key: `${d.getFullYear()}-${d.getMonth()}`, mes: d.toLocaleDateString('es-PE', { month: 'short' }), ingresos: 0, gastos: 0 });
       }
+      const monthIdx = (d) => months.findIndex(m => m.key === `${d.getFullYear()}-${d.getMonth()}`);
+      chartPaySnap.forEach(doc => {
+        const p = doc.data();
+        if (p.estado !== 'cobrado') return;
+        const d = p.fecha?.toDate ? p.fecha.toDate() : new Date(p.fecha);
+        const idx = monthIdx(d);
+        if (idx >= 0) months[idx].ingresos += p.montoPagado || p.monto || 0;
+      });
+      chartExpSnap.forEach(doc => {
+        const e = doc.data();
+        const d = e.fecha?.toDate ? e.fecha.toDate() : new Date(e.fecha);
+        const idx = monthIdx(d);
+        if (idx >= 0) months[idx].gastos += e.monto || 0;
+      });
 
       setStats({ ingresos, gastos, pendientes, pacientes });
       setChartData(months);
       setAlerts(alertList);
       setPendingList(pendingItems.slice(0, 5));
+      setTodayAppts(todayList);
+      setBirthdayIds(birthdaySet);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- carga inicial de datos, mismo patrón usado en el resto de páginas
+  useEffect(() => { loadData(); }, [loadData]);
 
   const balance = stats.ingresos - stats.gastos;
   const mesActual = new Date().toLocaleDateString('es-PE', { month: 'long', year: 'numeric' });
+  const hoyTexto = new Date().toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' });
+  const activasHoy = todayAppts.filter(a => a.estado === 'programada').length;
+
+  const TIPO_LABEL = { entrada: 'Sesión de entrada', paquete4: 'Paquete 4 sesiones', sesion_suelta: 'Sesión individual' };
+  const ESTADO_AGENDA = {
+    programada: { label: 'Programada', badge: 'info', border: 'var(--primary)' },
+    completada: { label: '✅ Hecha', badge: 'success', border: '#10B981' },
+    cancelada: { label: 'Anulada', badge: 'neutral', border: 'var(--text-3)' },
+    reprogramada: { label: '🔄 Reprogramada', badge: 'warning', border: 'var(--accent)' },
+  };
 
   return (
     <div>
@@ -164,6 +217,61 @@ export default function Dashboard() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Nueva Cita
         </button>
+      </div>
+
+      {/* Agenda de hoy */}
+      <div className="card" style={{ marginBottom: '18px', borderTop: '3px solid var(--accent)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            <div className="card-title" style={{ marginBottom: '2px' }}>📅 Agenda de hoy</div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-2)', textTransform: 'capitalize', fontWeight: 600 }}>{hoyTexto}</div>
+          </div>
+          {todayAppts.length > 0 && (
+            <span className="badge badge-info">{activasHoy} programada{activasHoy === 1 ? '' : 's'}</span>
+          )}
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-3)', fontSize: '0.84rem' }}>Cargando agenda...</div>
+        ) : todayAppts.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '28px 10px', color: 'var(--text-3)' }}>
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" strokeWidth="1.5" style={{ margin: '0 auto 10px', display: 'block' }}>
+              <rect x="3" y="4" width="18" height="17" rx="2.5"/><path d="M16 2v4M8 2v4M3 9h18"/>
+            </svg>
+            <p style={{ fontSize: '0.85rem' }}>No tienes citas programadas para hoy</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {todayAppts.map(a => {
+              const d = a.fecha?.toDate ? a.fecha.toDate() : new Date(a.fecha);
+              const hora = d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+              const cumple = birthdayIds.has(a.pacienteId);
+              const info = ESTADO_AGENDA[a.estado] || ESTADO_AGENDA.programada;
+              const inactiva = a.estado === 'cancelada' || a.estado === 'completada';
+              return (
+                <div key={a.id} style={{
+                  display: 'flex', alignItems: 'center', gap: '14px',
+                  background: 'var(--bg-3)', borderLeft: `3px solid ${info.border}`,
+                  borderRadius: '8px', padding: '10px 14px',
+                  opacity: a.estado === 'cancelada' ? 0.55 : 1,
+                }}>
+                  <div style={{ minWidth: '58px', fontWeight: 700, fontSize: '0.85rem', color: 'var(--text)' }}>{hora}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontWeight: 600, fontSize: '0.86rem', color: 'var(--text)',
+                      textDecoration: inactiva ? 'line-through' : 'none',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {a.pacienteNombre} {cumple && '🎂'}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>{TIPO_LABEL[a.tipo] || a.tipo}</div>
+                  </div>
+                  <span className={`badge badge-${info.badge}`} style={{ fontSize: '0.68rem', flexShrink: 0 }}>{info.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Alertas */}
