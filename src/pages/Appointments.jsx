@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, addDoc, updateDoc, doc, query, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, updateDoc, doc, query, orderBy, where, Timestamp } from 'firebase/firestore';
 import { formatSoles, PRECIO_SESION_ENTRADA, PRECIO_PAQUETE_4, getSesionesPaquete } from '../utils';
 import TimeInput from '../components/TimeInput';
 
@@ -13,6 +13,7 @@ export default function Appointments() {
   const [filter, setFilter] = useState('todos');
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(defaultForm());
+  const [editTarget, setEditTarget] = useState(null);
   const [reprogModal, setReprogModal] = useState(false);
   const [reprogTarget, setReprogTarget] = useState(null);
   const [reprogForm, setReprogForm] = useState({ fecha: '', hora: '10:00' });
@@ -48,9 +49,32 @@ export default function Appointments() {
     setForm(f => ({ ...f, pacienteId: id, pacienteNombre: p?.nombre || '' }));
   };
 
+  const openNueva = () => {
+    setEditTarget(null);
+    setForm(defaultForm());
+    setShowModal(true);
+  };
+
+  const openEditar = (a) => {
+    const d = a.fecha?.toDate ? a.fecha.toDate() : new Date(a.fecha);
+    const pad = n => String(n).padStart(2, '0');
+    setEditTarget(a);
+    setForm({
+      ...defaultForm(),
+      pacienteId: a.pacienteId || '', pacienteNombre: a.pacienteNombre || '',
+      fecha: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      hora: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+      tipo: a.tipo || 'entrada',
+      estado: a.estado || 'programada',
+      notas: a.notas || '',
+      generarCobro: false,
+    });
+    setShowModal(true);
+  };
+
   // Sesión que le tocaría a la nueva cita si es de tipo paquete4
   const proximaSesionPaquete = (() => {
-    if (form.tipo !== 'paquete4' || !form.pacienteId) return null;
+    if (editTarget || form.tipo !== 'paquete4' || !form.pacienteId) return null;
     const previas = appointments.filter(a => a.pacienteId === form.pacienteId && a.tipo === 'paquete4' && a.estado !== 'cancelada').length;
     return { sesion: (previas % 4) + 1, total: 4 };
   })();
@@ -58,6 +82,29 @@ export default function Appointments() {
   async function saveAppointment(e) {
     e.preventDefault();
     const fechaHora = new Date(`${form.fecha}T${form.hora}:00`);
+
+    if (editTarget) {
+      await updateDoc(doc(db, 'appointments', editTarget.id), {
+        pacienteId: form.pacienteId,
+        pacienteNombre: form.pacienteNombre,
+        fecha: Timestamp.fromDate(fechaHora),
+        tipo: form.tipo,
+        estado: form.estado,
+        notas: form.notas,
+        editadaAt: Timestamp.now(),
+      });
+      // Mantener alineado el cobro pendiente de la cita (si aún no tiene pagos)
+      const cobros = await getDocs(query(collection(db, 'payments'), where('citaId', '==', editTarget.id)));
+      await Promise.all(cobros.docs
+        .filter(c => c.data().estado === 'pendiente' && !(c.data().montoPagado > 0))
+        .map(c => updateDoc(c.ref, { pacienteId: form.pacienteId, pacienteNombre: form.pacienteNombre, fecha: Timestamp.fromDate(fechaHora) })));
+      setShowModal(false);
+      setEditTarget(null);
+      setForm(defaultForm());
+      loadAll();
+      return;
+    }
+
     const apptData = {
       pacienteId: form.pacienteId,
       pacienteNombre: form.pacienteNombre,
@@ -146,7 +193,7 @@ export default function Appointments() {
     <div>
       <div className="page-header">
         <h2 className="page-title">🗓️ Citas</h2>
-        <button className="btn btn-primary" onClick={() => { setForm(defaultForm()); setShowModal(true); }}>
+        <button className="btn btn-primary" onClick={openNueva}>
           + Nueva Cita
         </button>
       </div>
@@ -196,8 +243,9 @@ export default function Appointments() {
                   </td>
                   <td style={{ color: 'var(--text-3)', fontSize: '0.8rem', maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.notas || '—'}</td>
                   <td>
+                    <div style={{ display: 'flex', gap: '4px' }}>
                     {a.estado === 'programada' && (
-                      <div style={{ display: 'flex', gap: '4px' }}>
+                      <>
                         <button className="btn btn-sm btn-primary" onClick={() => changeStatus(a.id, 'completada')}>✅</button>
                         <button
                           className="btn btn-sm btn-ghost"
@@ -206,8 +254,10 @@ export default function Appointments() {
                           style={!puedeReprogramar(a) ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
                         >🔄</button>
                         <button className="btn btn-sm btn-ghost" title="Anular cita" onClick={() => changeStatus(a.id, 'cancelada')}>❌</button>
-                      </div>
+                      </>
                     )}
+                      <button className="btn btn-sm btn-ghost" title="Editar cita" onClick={() => openEditar(a)}>✏️</button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -220,7 +270,7 @@ export default function Appointments() {
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setShowModal(false)}>
           <div className="modal">
             <div className="modal-header">
-              <h3 className="modal-title">Nueva Cita</h3>
+              <h3 className="modal-title">{editTarget ? 'Editar Cita' : 'Nueva Cita'}</h3>
               <button className="btn btn-ghost btn-icon" onClick={() => setShowModal(false)}>✕</button>
             </div>
             <form onSubmit={saveAppointment}>
@@ -228,7 +278,7 @@ export default function Appointments() {
                 <label className="form-label">Paciente *</label>
                 <select className="form-select" required value={form.pacienteId} onChange={e => handlePaciente(e.target.value)}>
                   <option value="">Seleccionar paciente...</option>
-                  {patients.filter(p => p.estado === 'activo').map(p => (
+                  {patients.filter(p => p.estado === 'activo' || p.id === form.pacienteId).map(p => (
                     <option key={p.id} value={p.id}>{p.nombre}</option>
                   ))}
                 </select>
@@ -266,13 +316,21 @@ export default function Appointments() {
                   </select>
                 </div>
               </div>
-              <div className="form-group">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={form.generarCobro} onChange={e => setForm({...form, generarCobro: e.target.checked})} />
-                  <span className="form-label" style={{ margin: 0 }}>Generar cobro pendiente automáticamente</span>
-                </label>
-              </div>
-              {form.generarCobro && (
+              {editTarget ? (
+                editTarget.tipo !== form.tipo && (
+                  <div className="alert alert-info" style={{ marginBottom: '16px', fontSize: '0.8rem' }}>
+                    Cambiaste el tipo de servicio: revisa el monto del cobro de esta cita en Cobros.
+                  </div>
+                )
+              ) : (
+                <div className="form-group">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={form.generarCobro} onChange={e => setForm({...form, generarCobro: e.target.checked})} />
+                    <span className="form-label" style={{ margin: 0 }}>Generar cobro pendiente automáticamente</span>
+                  </label>
+                </div>
+              )}
+              {!editTarget && form.generarCobro && (
                 <div className="form-group">
                   <label className="form-label">Precio especial / descuento (opcional)</label>
                   <input
@@ -292,7 +350,7 @@ export default function Appointments() {
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
-                <button type="submit" className="btn btn-primary">Guardar cita</button>
+                <button type="submit" className="btn btn-primary">{editTarget ? 'Guardar cambios' : 'Guardar cita'}</button>
               </div>
             </form>
           </div>
