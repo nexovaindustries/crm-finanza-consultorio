@@ -180,6 +180,44 @@ export default function Payments() {
     }
   }
 
+  // Lo que este cobro sumó a cada cuenta bancaria, para revertirlo al anular
+  function ingresosPorCuenta(p) {
+    const porCuenta = {};
+    const sumar = (cuentaId, monto) => { if (cuentaId && monto > 0) porCuenta[cuentaId] = (porCuenta[cuentaId] || 0) + monto; };
+    if (p.servicio === 'paquete4') {
+      if (p.abonos?.length) p.abonos.forEach(a => sumar(a.cuentaId, Number(a.monto) || 0));
+      else sumar(p.cuentaId, Number(p.montoPagado) || 0);
+    } else if (p.estado === 'cobrado') {
+      sumar(p.cuentaId, Number(p.monto) || 0);
+    }
+    return porCuenta;
+  }
+
+  async function anularCobro(p) {
+    const porCuenta = ingresosPorCuenta(p);
+    const reversos = Object.entries(porCuenta).map(([id, monto]) => {
+      const c = bankAccounts.find(x => x.id === id);
+      return `• ${c ? (c.nombre || c.banco) : 'Cuenta'}: -${formatSoles(monto)}`;
+    });
+    const msg = `¿Anular este cobro?\n\n${p.pacienteNombre} — ${SERVICIOS.find(s => s.id === p.servicio)?.label || p.servicio} — ${formatSoles(p.monto)}\n\n`
+      + (reversos.length ? `Se descontará de las cuentas:\n${reversos.join('\n')}` : 'No se movió dinero a ninguna cuenta.')
+      + '\n\nEl cobro dejará de contar en ingresos y reportes.';
+    if (!window.confirm(msg)) return;
+    setSaving(true);
+    try {
+      for (const [cuentaId, monto] of Object.entries(porCuenta)) {
+        await incrementarSaldo(cuentaId, -monto);
+      }
+      await updateDoc(doc(db, 'payments', p.id), { estado: 'anulado', estadoAnterior: p.estado, anuladoAt: Timestamp.now() });
+      loadAll();
+    } catch (err) {
+      console.error('Error al anular cobro', err);
+      alert(`No se pudo anular el cobro: ${err.message || err}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function changeStatus(id, estado) {
     await updateDoc(doc(db, 'payments', id), { estado });
     loadAll();
@@ -201,7 +239,7 @@ export default function Payments() {
   }
 
   const filtered = filter === 'todos' ? payments : payments.filter(p => p.estado === filter);
-  const totalFiltrado = filtered.reduce((a, p) => a + (p.monto || 0), 0);
+  const totalFiltrado = filtered.filter(p => filter === 'anulado' || p.estado !== 'anulado').reduce((a, p) => a + (p.monto || 0), 0);
 
   return (
     <div>
@@ -214,7 +252,7 @@ export default function Payments() {
 
       {/* Filtros */}
       <div className="tabs">
-        {[['todos','Todos'],['cobrado','Cobrados'],['pendiente','Pendientes'],['vencido','Vencidos']].map(([val, lbl]) => (
+        {[['todos','Todos'],['cobrado','Cobrados'],['pendiente','Pendientes'],['vencido','Vencidos'],['anulado','Anulados']].map(([val, lbl]) => (
           <button key={val} className={`tab-btn ${filter === val ? 'active' : ''}`} onClick={() => setFilter(val)}>{lbl}</button>
         ))}
         <span style={{ marginLeft: 'auto', fontSize: '0.85rem', color: 'var(--text-3)', alignSelf: 'center', paddingRight: '8px' }}>
@@ -235,7 +273,7 @@ export default function Payments() {
             ) : filtered.map(p => {
               const igv = calcularIGV(p.monto || 0);
               return (
-                <tr key={p.id}>
+                <tr key={p.id} style={p.estado === 'anulado' ? { opacity: 0.5 } : undefined}>
                   <td><strong>{p.pacienteNombre}</strong></td>
                   <td>{SERVICIOS.find(s => s.id === p.servicio)?.label || p.servicio}</td>
                   <td style={{ color: 'var(--text-3)' }}>{formatSoles(p.baseImponible || igv.base)}</td>
@@ -250,13 +288,14 @@ export default function Payments() {
                   </td>
                   <td style={{ color: 'var(--text-3)' }}>{formatDate(p.fecha)}</td>
                   <td>
-                    <span className={`badge badge-${p.estado === 'cobrado' ? 'success' : p.estado === 'pendiente' ? 'warning' : 'danger'}`}>
-                      {p.estado === 'cobrado' ? '✅ Cobrado' : p.estado === 'pendiente' ? '⏳ Pendiente' : '❌ Vencido'}
+                    <span className={`badge badge-${p.estado === 'cobrado' ? 'success' : p.estado === 'pendiente' ? 'warning' : p.estado === 'anulado' ? 'neutral' : 'danger'}`}>
+                      {p.estado === 'cobrado' ? '✅ Cobrado' : p.estado === 'pendiente' ? '⏳ Pendiente' : p.estado === 'anulado' ? '🚫 Anulado' : '❌ Vencido'}
                     </span>
                   </td>
                   <td>
+                    <div style={{ display: 'flex', gap: '4px' }}>
                     {p.estado === 'pendiente' && (
-                      <div style={{ display: 'flex', gap: '4px' }}>
+                      <>
                         {p.servicio === 'paquete4' ? (
                           <button className="btn btn-sm btn-primary" onClick={() => openAbono(p)}>
                             {p.montoPagado > 0 ? '💳 Abonar' : '✅ Cobrar'}
@@ -264,9 +303,13 @@ export default function Payments() {
                         ) : (
                           <button className="btn btn-sm btn-primary" onClick={() => { setCobroTarget(p); setCobroCuentaId(''); }}>✅ Cobrar</button>
                         )}
-                        <button className="btn btn-sm btn-ghost" onClick={() => changeStatus(p.id, 'vencido')}>❌</button>
-                      </div>
+                        <button className="btn btn-sm btn-ghost" title="Marcar como vencido" onClick={() => changeStatus(p.id, 'vencido')}>❌</button>
+                      </>
                     )}
+                    {p.estado !== 'anulado' && (
+                      <button className="btn btn-sm btn-ghost" title="Anular cobro (registrado por error)" disabled={saving} onClick={() => anularCobro(p)}>🗑️</button>
+                    )}
+                    </div>
                   </td>
                 </tr>
               );

@@ -350,7 +350,7 @@ export default function Patients() {
                               <td>{p.servicio}</td>
                               <td><strong>{formatSoles(p.monto)}</strong></td>
                               <td>
-                                <span className={`badge badge-${p.estado === 'cobrado' ? 'success' : p.estado === 'vencido' ? 'danger' : 'warning'}`}>
+                                <span className={`badge badge-${p.estado === 'cobrado' ? 'success' : p.estado === 'vencido' ? 'danger' : p.estado === 'anulado' ? 'neutral' : 'warning'}`}>
                                   {p.estado}
                                 </span>
                               </td>

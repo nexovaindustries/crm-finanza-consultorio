@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, query, Timestamp } from 'firebase/firestore';
-import { parseLocalDate } from '../utils';
+import { parseLocalDate, getProximaSesion } from '../utils';
 import TimeInput from '../components/TimeInput';
 
 const DAYS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -80,6 +80,9 @@ export default function Calendar() {
     setForm(f => ({ ...f, pacienteId: id, pacienteNombre: p?.nombre || '' }));
   };
 
+  // Sesión que le tocaría: la siguiente a la última sesión de paquete del paciente
+  const sesionSugerida = form.tipo === 'paquete4' && form.pacienteId ? getProximaSesion(appointments, form.pacienteId) : 1;
+
   async function saveAppt(e) {
     e.preventDefault();
     const fechaHora = new Date(selectedDate);
@@ -92,10 +95,11 @@ export default function Calendar() {
       tipo: form.tipo,
       estado: 'programada',
       notas: form.notas,
+      sesionNumero: form.tipo === 'paquete4' && form.sesionNumero ? Number(form.sesionNumero) : null,
       createdAt: Timestamp.now(),
     });
     setShowModal(false);
-    setForm({ pacienteId: '', pacienteNombre: '', hora: '10:00', tipo: 'entrada', notas: '' });
+    setForm({ pacienteId: '', pacienteNombre: '', hora: '10:00', tipo: 'entrada', notas: '', sesionNumero: '' });
     loadData();
   }
 
@@ -214,6 +218,14 @@ export default function Calendar() {
                     <option value="paquete4">Paquete 4 (S/.650)</option>
                     <option value="sesion_suelta">Individual</option>
                   </select>
+                  {form.tipo === 'paquete4' && (
+                    <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                      <span>N° de sesión:</span>
+                      <select className="form-select" style={{ width: 'auto', padding: '4px 28px 4px 10px' }} value={form.sesionNumero || sesionSugerida} onChange={e => setForm({...form, sesionNumero: Number(e.target.value)})}>
+                        {[1, 2, 3, 4].map(n => <option key={n} value={n}>{n}/4</option>)}
+                      </select>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="modal-footer">

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, updateDoc, doc, query, orderBy, where, Timestamp } from 'firebase/firestore';
-import { formatSoles, PRECIO_SESION_ENTRADA, PRECIO_PAQUETE_4, getSesionesPaquete } from '../utils';
+import { formatSoles, PRECIO_SESION_ENTRADA, PRECIO_PAQUETE_4, getSesionesPaquete, getProximaSesion } from '../utils';
 import TimeInput from '../components/TimeInput';
 
 const ESTADOS = { programada: 'info', completada: 'success', cancelada: 'danger', reprogramada: 'warning' };
@@ -27,6 +27,7 @@ export default function Appointments() {
       tipo: 'entrada',
       estado: 'programada',
       notas: '',
+      sesionNumero: '',
       generarCobro: true,
       precioEspecial: '',
     };
@@ -67,21 +68,25 @@ export default function Appointments() {
       tipo: a.tipo || 'entrada',
       estado: a.estado || 'programada',
       notas: a.notas || '',
+      sesionNumero: a.sesionNumero || '',
       generarCobro: false,
     });
     setShowModal(true);
   };
 
-  // Sesión que le tocaría a la nueva cita si es de tipo paquete4
-  const proximaSesionPaquete = (() => {
-    if (editTarget || form.tipo !== 'paquete4' || !form.pacienteId) return null;
-    const previas = appointments.filter(a => a.pacienteId === form.pacienteId && a.tipo === 'paquete4' && a.estado !== 'cancelada').length;
-    return { sesion: (previas % 4) + 1, total: 4 };
+  // Sesión que le tocaría a la nueva cita: la siguiente a la última sesión de paquete del paciente
+  const sesionSugerida = (() => {
+    if (form.tipo !== 'paquete4' || !form.pacienteId) return 1;
+    if (editTarget) return getSesionesPaquete(appointments)[editTarget.id]?.sesion || 1;
+    return getProximaSesion(appointments, form.pacienteId);
   })();
+  const sesionElegida = form.sesionNumero || sesionSugerida;
 
   async function saveAppointment(e) {
     e.preventDefault();
     const fechaHora = new Date(`${form.fecha}T${form.hora}:00`);
+    // Solo se guarda si se eligió a mano; si no, la sesión se sigue calculando sola
+    const sesionNumero = form.tipo === 'paquete4' && form.sesionNumero ? Number(form.sesionNumero) : null;
 
     if (editTarget) {
       await updateDoc(doc(db, 'appointments', editTarget.id), {
@@ -91,6 +96,7 @@ export default function Appointments() {
         tipo: form.tipo,
         estado: form.estado,
         notas: form.notas,
+        sesionNumero,
         editadaAt: Timestamp.now(),
       });
       // Mantener alineado el cobro pendiente de la cita (si aún no tiene pagos)
@@ -112,6 +118,7 @@ export default function Appointments() {
       tipo: form.tipo,
       estado: form.estado,
       notas: form.notas,
+      sesionNumero,
       createdAt: Timestamp.now(),
     };
     const apptRef = await addDoc(collection(db, 'appointments'), apptData);
@@ -301,9 +308,12 @@ export default function Appointments() {
                     <option value="paquete4">Paquete 4 sesiones (S/. 650)</option>
                     <option value="sesion_suelta">Sesión individual</option>
                   </select>
-                  {proximaSesionPaquete && (
-                    <div style={{ marginTop: '6px', fontSize: '0.8rem', color: 'var(--text-3)' }}>
-                      Esta será la sesión <strong>{proximaSesionPaquete.sesion}/{proximaSesionPaquete.total}</strong> del paquete
+                  {form.tipo === 'paquete4' && (
+                    <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                      <span>N° de sesión:</span>
+                      <select className="form-select" style={{ width: 'auto', padding: '4px 28px 4px 10px' }} value={sesionElegida} onChange={e => setForm({...form, sesionNumero: Number(e.target.value)})}>
+                        {[1, 2, 3, 4].map(n => <option key={n} value={n}>{n}/4</option>)}
+                      </select>
                     </div>
                   )}
                 </div>

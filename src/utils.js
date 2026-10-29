@@ -84,11 +84,22 @@ export function getSesionesPaquete(appointments, tamanoPaquete = 4) {
 
   const sesionPorCita = {};
   ordenadas.forEach(a => {
-    const count = (porPaciente[a.pacienteId] || 0) + 1;
+    // Si la cita tiene un número de sesión puesto a mano, la cuenta sigue desde ahí
+    const manual = Number(a.sesionNumero);
+    const count = manual >= 1 && manual <= tamanoPaquete ? manual : (porPaciente[a.pacienteId] || 0) + 1;
     porPaciente[a.pacienteId] = count;
     sesionPorCita[a.id] = { sesion: ((count - 1) % tamanoPaquete) + 1, total: tamanoPaquete };
   });
   return sesionPorCita;
+}
+
+// Siguiente sesión de paquete para un paciente: la que sigue a su última cita de paquete
+export function getProximaSesion(appointments, pacienteId, tamanoPaquete = 4) {
+  const sesiones = getSesionesPaquete(appointments, tamanoPaquete);
+  const fechaDe = a => (a.fecha?.toDate ? a.fecha.toDate() : new Date(a.fecha));
+  const previas = appointments.filter(a => a.pacienteId === pacienteId && sesiones[a.id]).sort((a, b) => fechaDe(a) - fechaDe(b));
+  const ultima = previas[previas.length - 1];
+  return ultima ? (sesiones[ultima.id].sesion % tamanoPaquete) + 1 : 1;
 }
 
 // Edad legible en años y meses, ej: "8 años, 4 meses" o "7 meses" para bebés
