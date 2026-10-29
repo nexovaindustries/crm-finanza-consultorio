@@ -138,7 +138,7 @@ export default function Payments() {
     const sesionesRestantes = 4 - (p.sesionesPagadas || 0);
     const sugerido = sesionesRestantes > 0 ? Math.min(saldoPendiente, (p.monto || 0) / 4) : saldoPendiente;
     setAbonoTarget(p);
-    setAbonoForm({ cuentaId: '', cuentaNombre: '', sesiones: 1, monto: sugerido > 0 ? sugerido.toFixed(2) : '' });
+    setAbonoForm({ cuentaId: '', cuentaNombre: '', sesiones: sesionesRestantes > 0 ? 1 : 0, monto: sugerido > 0 ? sugerido.toFixed(2) : '' });
   };
 
   async function saveAbono(e) {
@@ -147,11 +147,13 @@ export default function Payments() {
     setSaving(true);
     try {
       const monto = Number(abonoForm.monto) || 0;
-      const sesiones = Number(abonoForm.sesiones) || 0;
+      const sesionesRestantes = Math.max(4 - (abonoTarget.sesionesPagadas || 0), 0);
+      const sesiones = Math.min(Number(abonoForm.sesiones) || 0, sesionesRestantes);
       const abono = { cuentaId: abonoForm.cuentaId, cuentaNombre: abonoForm.cuentaNombre, sesiones, monto, fecha: Timestamp.now() };
       const montoPagado = (abonoTarget.montoPagado || 0) + monto;
-      const sesionesPagadas = Math.min((abonoTarget.sesionesPagadas || 0) + sesiones, 4);
       const estado = montoPagado >= (abonoTarget.monto || 0) ? 'cobrado' : 'pendiente';
+      // Paquete pagado completo = todas las sesiones cubiertas
+      const sesionesPagadas = estado === 'cobrado' ? 4 : Math.min((abonoTarget.sesionesPagadas || 0) + sesiones, 4);
       await updateDoc(doc(db, 'payments', abonoTarget.id), {
         abonos: [...(abonoTarget.abonos || []), abono],
         montoPagado,
@@ -436,10 +438,18 @@ export default function Payments() {
                 </select>
               </div>
               <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Sesión(es) que cubre *</label>
-                  <input className="form-input" type="number" required min="1" max={4 - (abonoTarget.sesionesPagadas || 0)} value={abonoForm.sesiones} onChange={e => setAbonoForm({...abonoForm, sesiones: e.target.value})} />
-                </div>
+                {(() => {
+                  const sesionesRestantes = Math.max(4 - (abonoTarget.sesionesPagadas || 0), 0);
+                  return (
+                    <div className="form-group">
+                      <label className="form-label">Sesión(es) que cubre *</label>
+                      <input className="form-input" type="number" required min="0" max={sesionesRestantes} disabled={sesionesRestantes === 0} value={abonoForm.sesiones} onChange={e => setAbonoForm({...abonoForm, sesiones: e.target.value})} />
+                      {sesionesRestantes === 0 && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: '4px' }}>Las 4 sesiones ya están cubiertas; este abono solo completa el saldo.</div>
+                      )}
+                    </div>
+                  );
+                })()}
                 <div className="form-group">
                   <label className="form-label">Monto a pagar (S/.) *</label>
                   <input className="form-input" type="number" required min="0.01" step="0.01" max={(abonoTarget.monto || 0) - (abonoTarget.montoPagado || 0)} value={abonoForm.monto} onChange={e => setAbonoForm({...abonoForm, monto: e.target.value})} />
