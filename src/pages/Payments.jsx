@@ -60,7 +60,7 @@ export default function Payments() {
   async function incrementarSaldo(cuentaId, monto) {
     const cuenta = bankAccounts.find(x => x.id === cuentaId);
     if (cuenta) {
-      await updateDoc(doc(db, 'bank_accounts', cuentaId), { saldo: (cuenta.saldo || 0) + monto, updatedAt: Timestamp.now() });
+      await updateDoc(doc(db, 'bank_accounts', cuentaId), { saldo: Math.round(((cuenta.saldo || 0) + monto) * 100) / 100, updatedAt: Timestamp.now() });
     }
   }
 
@@ -133,8 +133,11 @@ export default function Payments() {
     setAbonoForm(f => ({ ...f, cuentaId, cuentaNombre: c ? (c.nombre || c.banco) : '' }));
   };
 
+  const redondear = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const saldoDe = (p) => Math.max(redondear((p.monto || 0) - (p.montoPagado || 0)), 0);
+
   const openAbono = (p) => {
-    const saldoPendiente = (p.monto || 0) - (p.montoPagado || 0);
+    const saldoPendiente = saldoDe(p);
     const sesionesRestantes = 4 - (p.sesionesPagadas || 0);
     const sugerido = sesionesRestantes > 0 ? Math.min(saldoPendiente, (p.monto || 0) / 4) : saldoPendiente;
     setAbonoTarget(p);
@@ -143,15 +146,19 @@ export default function Payments() {
 
   async function saveAbono(e) {
     e.preventDefault();
-    if (!abonoTarget || !abonoForm.cuentaId) return;
+    if (!abonoTarget) return;
+    if (!abonoForm.cuentaId) { alert('Selecciona la cuenta a la que se paga.'); return; }
+    const monto = redondear(abonoForm.monto);
+    const saldo = saldoDe(abonoTarget);
+    if (monto <= 0) { alert('Ingresa un monto mayor a 0.'); return; }
+    if (monto > saldo) { alert(`El monto no puede ser mayor al saldo pendiente (${formatSoles(saldo)}).`); return; }
     setSaving(true);
     try {
-      const monto = Number(abonoForm.monto) || 0;
       const sesionesRestantes = Math.max(4 - (abonoTarget.sesionesPagadas || 0), 0);
-      const sesiones = Math.min(Number(abonoForm.sesiones) || 0, sesionesRestantes);
-      const abono = { cuentaId: abonoForm.cuentaId, cuentaNombre: abonoForm.cuentaNombre, sesiones, monto, fecha: Timestamp.now() };
-      const montoPagado = (abonoTarget.montoPagado || 0) + monto;
-      const estado = montoPagado >= (abonoTarget.monto || 0) ? 'cobrado' : 'pendiente';
+      const sesiones = Math.max(Math.min(Number(abonoForm.sesiones) || 0, sesionesRestantes), 0);
+      const abono = { cuentaId: abonoForm.cuentaId, cuentaNombre: abonoForm.cuentaNombre || '', sesiones, monto, fecha: Timestamp.now() };
+      const montoPagado = redondear((abonoTarget.montoPagado || 0) + monto);
+      const estado = montoPagado >= redondear(abonoTarget.monto) ? 'cobrado' : 'pendiente';
       // Paquete pagado completo = todas las sesiones cubiertas
       const sesionesPagadas = estado === 'cobrado' ? 4 : Math.min((abonoTarget.sesionesPagadas || 0) + sesiones, 4);
       await updateDoc(doc(db, 'payments', abonoTarget.id), {
@@ -160,11 +167,14 @@ export default function Payments() {
         sesionesPagadas,
         estado,
         cuentaId: abonoForm.cuentaId,
-        cuentaNombre: abonoForm.cuentaNombre,
+        cuentaNombre: abonoForm.cuentaNombre || '',
       });
       await incrementarSaldo(abonoForm.cuentaId, monto);
       setAbonoTarget(null);
       loadAll();
+    } catch (err) {
+      console.error('Error al registrar abono', err);
+      alert(`No se pudo registrar el abono: ${err.message || err}`);
     } finally {
       setSaving(false);
     }
@@ -426,10 +436,10 @@ export default function Payments() {
                 <span style={{ color: 'var(--text-3)' }}>Pagado hasta ahora</span><strong style={{ color: 'var(--success)' }}>{formatSoles(abonoTarget.montoPagado || 0)}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
-                <span style={{ color: 'var(--text-3)' }}>Saldo pendiente</span><strong style={{ color: 'var(--warning)' }}>{formatSoles((abonoTarget.monto || 0) - (abonoTarget.montoPagado || 0))}</strong>
+                <span style={{ color: 'var(--text-3)' }}>Saldo pendiente</span><strong style={{ color: 'var(--warning)' }}>{formatSoles(saldoDe(abonoTarget))}</strong>
               </div>
             </div>
-            <form onSubmit={saveAbono}>
+            <form onSubmit={saveAbono} noValidate>
               <div className="form-group">
                 <label className="form-label">💳 ¿A qué cuenta se paga? *</label>
                 <select className="form-select" required value={abonoForm.cuentaId} onChange={e => handleAbonoCuenta(e.target.value)}>
@@ -452,11 +462,11 @@ export default function Payments() {
                 })()}
                 <div className="form-group">
                   <label className="form-label">Monto a pagar (S/.) *</label>
-                  <input className="form-input" type="number" required min="0.01" step="0.01" max={(abonoTarget.monto || 0) - (abonoTarget.montoPagado || 0)} value={abonoForm.monto} onChange={e => setAbonoForm({...abonoForm, monto: e.target.value})} />
+                  <input className="form-input" type="number" required min="0.01" step="0.01" max={saldoDe(abonoTarget)} value={abonoForm.monto} onChange={e => setAbonoForm({...abonoForm, monto: e.target.value})} />
                 </div>
               </div>
               {abonoForm.monto && (() => {
-                const restante = (abonoTarget.monto || 0) - (abonoTarget.montoPagado || 0) - (Number(abonoForm.monto) || 0);
+                const restante = redondear(saldoDe(abonoTarget) - (Number(abonoForm.monto) || 0));
                 const sesionesTotal = Math.min((abonoTarget.sesionesPagadas || 0) + (Number(abonoForm.sesiones) || 0), 4);
                 return (
                   <div style={{
